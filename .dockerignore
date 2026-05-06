@@ -1,0 +1,16 @@
+.git
+.gitignore
+.dockerignore
+Dockerfile
+docker-compose.yml
+README.md
+data/
+bin/
+recodarr
+*.db
+*.sqlite*
+web/node_modules
+web/dist
+.idea
+.vscode
+.DS_Store

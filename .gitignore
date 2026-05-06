@@ -1,0 +1,29 @@
+# Go
+/bin/
+/recodarr
+*.test
+*.out
+coverage.*
+
+# SQLite
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Node / Vite
+web/node_modules/
+web/dist/
+web/.vite/
+web/*.log
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local data
+/data/
+.env
+.env.local

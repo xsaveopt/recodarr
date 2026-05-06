@@ -1,0 +1,31 @@
+# Example deployment. Adjust volume paths and device passthrough for your host.
+services:
+  recodarr:
+    build: .
+    image: recodarr:latest
+    container_name: recodarr
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      TZ: Europe/Amsterdam
+    volumes:
+      - ./data:/data
+      # Mount your *arr library roots so Recodarr can re-encode in place.
+      # Paths inside the container must match what Sonarr/Radarr send in webhook payloads.
+      - /srv/media:/srv/media
+    # Intel iGPU (QSV/VAAPI) device passthrough — uncomment for hwaccel.
+    # devices:
+    #   - /dev/dri:/dev/dri
+    # group_add:
+    #   - "104"  # render — set to host's `getent group render | cut -d: -f3`
+    #   - "44"   # video
+    #
+    # NVIDIA NVENC — requires nvidia-container-toolkit on the host.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu, video]

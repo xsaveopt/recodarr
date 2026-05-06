@@ -1,0 +1,141 @@
+export type ArrKind = "sonarr" | "radarr";
+
+export interface ArrInstance {
+  id: number;
+  kind: ArrKind;
+  name: string;
+  url: string;
+  apiKey?: string;        // write-only; never returned by GET
+  webhookSecret?: string; // write-only; never returned by GET
+  enabled: boolean;
+  hasApiKey: boolean;
+  hasWebhookSecret: boolean;
+}
+
+export interface QbitInstance {
+  id: number;
+  name: string;
+  url: string;
+  username: string;
+  password?: string; // write-only
+  hasPassword: boolean;
+}
+
+export interface Profile {
+  id: number;
+  name: string;
+  encoder: string;
+  encoderPreset: string;
+  encoderProfile: string;
+  encoderTune: string;
+  encoderLevel: string;
+  quality: number;
+  maxWidth: number;
+  maxHeight: number;
+  audioEncoder: string;
+  audioBitrate: number;
+  audioMixdown: string;
+  subtitleCopy: boolean;
+  twoPass: boolean;
+  containerFormat: string;
+  extraArgs: string;
+  framerate: string;
+}
+
+export interface TagMapping {
+  id: number;
+  arrKind: "sonarr" | "radarr" | "both";
+  tagId: number;
+  tagLabel: string;
+  profileId: number;
+}
+
+export interface InstanceTag {
+  instanceId: number;
+  instanceName: string;
+  kind: "sonarr" | "radarr";
+  tagId: number;
+  tagLabel: string;
+}
+
+export interface EncoderCaps {
+  name: string;
+  presets: string[];
+  profiles: string[];
+  tunes: string[];
+  levels: string[];
+}
+
+export interface HbCaps {
+  encoders: EncoderCaps[];
+}
+
+export interface DebugInfo {
+  hbVersion: string;
+  hbFound: boolean;
+  encoders: string[];
+  vaapiAvailable: boolean;
+  qsvAvailable: boolean;
+  nvencAvailable: boolean;
+  platform: string;
+  arch: string;
+}
+
+export type JobStatus = "waiting_for_seed" | "ready" | "encoding" | "done" | "failed";
+
+export interface Job {
+  id: number;
+  arrKind: ArrKind;
+  arrInstanceId: number;
+  arrItemId: number;
+  arrParentId: number;
+  title: string;
+  filePath: string;
+  fileSize: number;
+  downloadId: string;
+  profileId: number | null;
+  status: JobStatus;
+  error?: string;
+  encodeLog?: string;
+  refreshError?: string;
+  attempts: number;
+  createdAt: string;
+  updatedAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  originalSize?: number;
+  finalSize?: number;
+}
+
+export interface WorkerStatus {
+  isEncoding: boolean;
+  encodingJobId: number;
+  lastTickAt: string | null;
+  window: WindowStatus;
+}
+
+export interface WindowStatus {
+  start: string;
+  end: string;
+  active: boolean;
+  hasLimit: boolean;
+}
+
+export interface JobStats {
+  waitingForSeed: number;
+  ready: number;
+  encoding: number;
+  done: number;
+  failed: number;
+  totalSavedBytes: number;
+}
+
+export interface AppSettings {
+  worker_interval_seconds?: string;
+  encoding_window_start?: string;
+  encoding_window_end?: string;
+  notify_url?: string;
+  notify_on_done?: string;
+  notify_on_fail?: string;
+  [key: string]: string | undefined;
+}

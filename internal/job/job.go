@@ -1,0 +1,464 @@
+package job
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/sratabix/recodarr/internal/handbrake"
+	"github.com/sratabix/recodarr/internal/notify"
+	"github.com/sratabix/recodarr/internal/qbit"
+	"github.com/sratabix/recodarr/internal/arr"
+	"github.com/sratabix/recodarr/internal/store"
+)
+
+type Status string
+
+const (
+	StatusWaitingForSeed Status = "waiting_for_seed"
+	StatusReady          Status = "ready"
+	StatusEncoding       Status = "encoding"
+	StatusDone           Status = "done"
+	StatusFailed         Status = "failed"
+)
+
+type Job struct {
+	ID            int64     `json:"id"`
+	ArrKind       string    `json:"arrKind"`
+	ArrInstanceID int64     `json:"arrInstanceId"`
+	ArrItemID     int64     `json:"arrItemId"`
+	Title         string    `json:"title"`
+	FilePath      string    `json:"filePath"`
+	FileSize      int64     `json:"fileSize"`
+	DownloadID    string    `json:"downloadId"`
+	ProfileID     *int64    `json:"profileId,omitempty"`
+	Status        Status    `json:"status"`
+	Error         string    `json:"error,omitempty"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
+}
+
+type ProgressEvent struct {
+	JobID   int64   `json:"jobId"`
+	Title   string  `json:"title"`
+	Percent float64 `json:"percent"`
+	FPS     float64 `json:"fps"`
+	ETA     string  `json:"eta"`
+}
+
+type Worker struct {
+	store          *store.Store
+	mu             sync.Mutex
+	cancelEncoding context.CancelFunc
+	encodingJobID  int64
+	lastTickAt     time.Time
+	currentTitle   string
+	lastProgress   ProgressEvent
+	subscribers    map[chan ProgressEvent]struct{}
+}
+
+func NewWorker(s *store.Store) *Worker {
+	return &Worker{store: s, subscribers: make(map[chan ProgressEvent]struct{})}
+}
+
+// Subscribe returns a channel that receives progress events for the currently-encoding job.
+// The caller must call the returned cancel func when done; the channel is closed by the worker.
+func (w *Worker) Subscribe() (<-chan ProgressEvent, func()) {
+	ch := make(chan ProgressEvent, 8)
+	w.mu.Lock()
+	w.subscribers[ch] = struct{}{}
+	last := w.lastProgress
+	hasLast := w.encodingJobID != 0
+	w.mu.Unlock()
+	if hasLast && last.JobID != 0 {
+		select {
+		case ch <- last:
+		default:
+		}
+	}
+	return ch, func() {
+		w.mu.Lock()
+		if _, ok := w.subscribers[ch]; ok {
+			delete(w.subscribers, ch)
+			close(ch)
+		}
+		w.mu.Unlock()
+	}
+}
+
+// CurrentProgress returns the most recent progress event (zero-value if not encoding).
+func (w *Worker) CurrentProgress() ProgressEvent {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.encodingJobID == 0 {
+		return ProgressEvent{}
+	}
+	return w.lastProgress
+}
+
+func (w *Worker) broadcast(ev ProgressEvent) {
+	w.mu.Lock()
+	w.lastProgress = ev
+	subs := make([]chan ProgressEvent, 0, len(w.subscribers))
+	for ch := range w.subscribers {
+		subs = append(subs, ch)
+	}
+	w.mu.Unlock()
+	for _, ch := range subs {
+		select {
+		case ch <- ev:
+		default:
+			// slow subscriber — drop the event rather than blocking the encode loop
+		}
+	}
+}
+
+// CancelEncoding cancels the currently running encode for jobID.
+// Returns true if the job was active and cancellation was sent.
+func (w *Worker) CancelEncoding(jobID int64) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.encodingJobID != jobID || w.cancelEncoding == nil {
+		return false
+	}
+	w.cancelEncoding()
+	return true
+}
+
+// EncodingJobID returns the ID of the currently encoding job (0 if none).
+func (w *Worker) EncodingJobID() int64 {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.encodingJobID
+}
+
+// LastTickAt returns the time of the most recent worker tick (zero if not yet ticked).
+func (w *Worker) LastTickAt() time.Time {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.lastTickAt
+}
+
+// WindowStatus reports the encoding window configuration and whether the worker
+// is currently inside it. UI surfaces this so a paused worker isn't a mystery.
+type WindowStatus struct {
+	Start    string `json:"start"`
+	End      string `json:"end"`
+	Active   bool   `json:"active"`
+	HasLimit bool   `json:"hasLimit"`
+}
+
+func (w *Worker) WindowStatus(ctx context.Context) WindowStatus {
+	cfg, _ := w.store.LoadAppSettings(ctx)
+	if cfg.EncodingWindowStart == "" || cfg.EncodingWindowEnd == "" {
+		return WindowStatus{Active: true}
+	}
+	return WindowStatus{
+		Start:    cfg.EncodingWindowStart,
+		End:      cfg.EncodingWindowEnd,
+		Active:   w.inEncodingWindow(ctx),
+		HasLimit: true,
+	}
+}
+
+func (w *Worker) Run(ctx context.Context) {
+	slog.Info("worker started")
+	w.tick(ctx)
+	for {
+		interval := w.readInterval(ctx)
+		select {
+		case <-ctx.Done():
+			slog.Info("worker stopped")
+			return
+		case <-time.After(interval):
+			w.tick(ctx)
+		}
+	}
+}
+
+func (w *Worker) readInterval(ctx context.Context) time.Duration {
+	cfg, _ := w.store.LoadAppSettings(ctx)
+	return time.Duration(cfg.WorkerIntervalSeconds) * time.Second
+}
+
+func (w *Worker) inEncodingWindow(ctx context.Context) bool {
+	cfg, _ := w.store.LoadAppSettings(ctx)
+	if cfg.EncodingWindowStart == "" || cfg.EncodingWindowEnd == "" {
+		return true
+	}
+	now := time.Now()
+	startH, startM := parseHHMM(cfg.EncodingWindowStart)
+	endH, endM := parseHHMM(cfg.EncodingWindowEnd)
+	startMins := startH*60 + startM
+	endMins := endH*60 + endM
+	nowMins := now.Hour()*60 + now.Minute()
+	if startMins <= endMins {
+		return nowMins >= startMins && nowMins < endMins
+	}
+	// overnight window e.g. 22:00–06:00
+	return nowMins >= startMins || nowMins < endMins
+}
+
+func parseHHMM(s string) (int, int) {
+	parts := strings.SplitN(s, ":", 2)
+	if len(parts) != 2 {
+		return 0, 0
+	}
+	h, _ := strconv.Atoi(parts[0])
+	m, _ := strconv.Atoi(parts[1])
+	return h, m
+}
+
+func (w *Worker) tick(ctx context.Context) {
+	w.mu.Lock()
+	w.lastTickAt = time.Now()
+	w.mu.Unlock()
+	w.checkSeeding(ctx)
+	w.runOneEncode(ctx)
+}
+
+// checkSeeding moves jobs from waiting_for_seed → ready when qBit no longer holds the torrent.
+func (w *Worker) checkSeeding(ctx context.Context) {
+	jobs, err := w.store.JobsByStatus(ctx, string(StatusWaitingForSeed), 100)
+	if err != nil {
+		slog.Error("checkSeeding list", "err", err)
+		return
+	}
+	if len(jobs) == 0 {
+		return
+	}
+
+	qbitRow, err := w.store.FirstQbitInstance(ctx)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			slog.Warn("qbit not configured; jobs remain waiting", "count", len(jobs))
+			return
+		}
+		slog.Error("checkSeeding qbit lookup", "err", err)
+		return
+	}
+
+	client, err := qbit.New(qbitRow.URL, qbitRow.Username, qbitRow.Password)
+	if err != nil {
+		slog.Error("qbit client", "err", err)
+		return
+	}
+	if err := client.Login(ctx); err != nil {
+		slog.Error("qbit login", "err", err)
+		return
+	}
+
+	for _, j := range jobs {
+		if j.DownloadID == "" {
+			w.transition(ctx, j.ID, string(StatusWaitingForSeed), string(StatusReady), "no downloadId, skipping seed check")
+			continue
+		}
+		t, err := client.TorrentByHash(ctx, j.DownloadID)
+		if err != nil {
+			slog.Warn("qbit torrent lookup", "id", j.ID, "err", err)
+			continue
+		}
+		if t == nil {
+			w.transition(ctx, j.ID, string(StatusWaitingForSeed), string(StatusReady), "qbit no longer holds torrent")
+		}
+	}
+}
+
+func (w *Worker) transition(ctx context.Context, id int64, from, to, reason string) {
+	ok, err := w.store.TransitionJobStatus(ctx, id, from, to)
+	if err != nil {
+		slog.Error("transition", "id", id, "err", err)
+		return
+	}
+	if ok {
+		slog.Info("job transitioned", "id", id, "from", from, "to", to, "reason", reason)
+	}
+}
+
+// runOneEncode picks a single ready job and runs it to completion.
+func (w *Worker) runOneEncode(ctx context.Context) {
+	if !w.inEncodingWindow(ctx) {
+		slog.Debug("outside encoding window, skipping encode")
+		return
+	}
+
+	jobs, err := w.store.JobsByStatus(ctx, string(StatusReady), 1)
+	if err != nil {
+		slog.Error("runOneEncode list", "err", err)
+		return
+	}
+	if len(jobs) == 0 {
+		return
+	}
+	j := jobs[0]
+
+	claimed, err := w.store.MarkJobEncoding(ctx, j.ID)
+	if err != nil {
+		slog.Error("claim job", "id", j.ID, "err", err)
+		return
+	}
+	if !claimed {
+		// Either we raced another tick or this job has hit MaxJobAttempts. The
+		// row is still 'ready'; if attempts is already at the cap, fail it now
+		// so it stops blocking the queue.
+		if j.Attempts >= store.MaxJobAttempts {
+			_ = w.store.MarkJobFailed(ctx, j.ID,
+				fmt.Sprintf("gave up after %d attempts", j.Attempts), "")
+			slog.Warn("job exceeded max attempts", "id", j.ID, "attempts", j.Attempts)
+		}
+		return
+	}
+
+	if !j.ProfileID.Valid {
+		_ = w.store.MarkJobFailed(ctx, j.ID, "no profile assigned (tag-profile mapping missing)", "")
+		slog.Error("job missing profile", "id", j.ID)
+		return
+	}
+	profile, err := w.store.GetProfile(ctx, j.ProfileID.Int64)
+	if err != nil {
+		_ = w.store.MarkJobFailed(ctx, j.ID, "profile lookup: "+err.Error(), "")
+		return
+	}
+
+	if err := checkDiskSpace(j.FilePath, j.FileSize); err != nil {
+		_ = w.store.MarkJobFailed(ctx, j.ID, err.Error(), "")
+		slog.Error("disk space check failed", "id", j.ID, "err", err)
+		return
+	}
+
+	encCtx, encCancel := context.WithCancel(ctx)
+	w.mu.Lock()
+	w.encodingJobID = j.ID
+	w.currentTitle = j.Title
+	w.cancelEncoding = encCancel
+	w.lastProgress = ProgressEvent{JobID: j.ID, Title: j.Title}
+	w.mu.Unlock()
+	defer func() {
+		encCancel()
+		w.mu.Lock()
+		w.encodingJobID = 0
+		w.cancelEncoding = nil
+		w.currentTitle = ""
+		w.lastProgress = ProgressEvent{}
+		w.mu.Unlock()
+	}()
+
+	slog.Info("encoding", "id", j.ID, "title", j.Title, "path", j.FilePath, "encoder", profile.Encoder)
+	onProgress := func(p handbrake.Progress) {
+		w.broadcast(ProgressEvent{JobID: j.ID, Title: j.Title, Percent: p.Percent, FPS: p.FPS, ETA: p.ETA})
+	}
+	result, err := handbrake.Run(encCtx, j.FilePath, handbrake.Settings{
+		Encoder:         profile.Encoder,
+		EncoderPreset:   profile.EncoderPreset,
+		EncoderProfile:  profile.EncoderProfile,
+		EncoderTune:     profile.EncoderTune,
+		EncoderLevel:    profile.EncoderLevel,
+		Quality:         profile.Quality,
+		MaxWidth:        profile.MaxWidth,
+		MaxHeight:       profile.MaxHeight,
+		AudioEncoder:    profile.AudioEncoder,
+		AudioBitrate:    profile.AudioBitrate,
+		AudioMixdown:    profile.AudioMixdown,
+		SubtitleCopy:    profile.SubtitleCopy,
+		TwoPass:         profile.TwoPass,
+		ContainerFormat: profile.ContainerFormat,
+		ExtraArgs:       profile.ExtraArgs,
+		Framerate:       profile.Framerate,
+	}, onProgress)
+	if err != nil {
+		msg := err.Error()
+		if encCtx.Err() != nil {
+			msg = "cancelled"
+		}
+		encLog := truncateLog(result.Log, 200)
+		_ = w.store.MarkJobFailed(ctx, j.ID, msg, encLog)
+		slog.Error("encode failed", "id", j.ID, "err", msg)
+		go notify.Send(context.Background(), w.store, j.Title, "failed", j.FilePath, j.FileSize, 0)
+		return
+	}
+
+	if err := w.store.MarkJobDone(ctx, j.ID, result.FinalSize); err != nil {
+		slog.Error("mark done", "id", j.ID, "err", err)
+		return
+	}
+	slog.Info("encode done", "id", j.ID, "originalSize", j.FileSize, "finalSize", result.FinalSize)
+	go notify.Send(context.Background(), w.store, j.Title, "done", j.FilePath, j.FileSize, result.FinalSize)
+
+	w.refreshArr(ctx, j)
+}
+
+// checkDiskSpace verifies the directory containing path has at least 1.1× needed bytes free.
+func checkDiskSpace(path string, needed int64) error {
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(filepath.Dir(path), &stat); err != nil {
+		return nil // can't stat — proceed and let HandBrake fail if truly out of space
+	}
+	available := int64(stat.Bavail) * int64(stat.Bsize)
+	required := needed + needed/10 // 110% of source size
+	if available < required {
+		return fmt.Errorf("insufficient disk space: need %s, have %s",
+			formatBytes(required), formatBytes(available))
+	}
+	return nil
+}
+
+func formatBytes(n int64) string {
+	if n < 1024 {
+		return fmt.Sprintf("%d B", n)
+	}
+	units := []string{"KB", "MB", "GB", "TB"}
+	v := float64(n) / 1024
+	i := 0
+	for v >= 1024 && i < len(units)-1 {
+		v /= 1024
+		i++
+	}
+	return fmt.Sprintf("%.1f %s", v, units[i])
+}
+
+// maxEncodeLogBytes caps the encode_log column to keep pathological HandBrake output
+// (e.g. binary garbage, megabyte-long single lines) from bloating the SQLite DB.
+const maxEncodeLogBytes = 64 * 1024
+
+// truncateLog keeps at most maxLines lines from the tail of s, then enforces a hard byte
+// cap so a single huge line can't blow past the limit.
+func truncateLog(s string, maxLines int) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	if len(lines) > maxLines {
+		lines = lines[len(lines)-maxLines:]
+	}
+	out := strings.Join(lines, "\n")
+	if len(out) > maxEncodeLogBytes {
+		// Keep the tail (most recent output is usually the most useful for diagnosis).
+		out = "…[truncated]\n" + out[len(out)-maxEncodeLogBytes:]
+	}
+	return out
+}
+
+// refreshArr asks Sonarr/Radarr to rescan so it picks up the new file.
+func (w *Worker) refreshArr(ctx context.Context, j store.JobRow) {
+	if j.ArrParentID == 0 {
+		return
+	}
+	inst, err := w.store.GetArrInstance(ctx, j.ArrInstanceID)
+	if err != nil {
+		slog.Warn("refreshArr: instance lookup", "id", j.ArrInstanceID, "err", err)
+		return
+	}
+	if j.ArrKind != "sonarr" && j.ArrKind != "radarr" {
+		return
+	}
+	if err := arr.New(arr.Kind(j.ArrKind), inst.URL, inst.APIKey).Refresh(ctx, j.ArrParentID); err != nil {
+		slog.Warn("arr refresh", "kind", j.ArrKind, "jobId", j.ID, "err", err)
+		_ = w.store.SetRefreshError(ctx, j.ID, err.Error())
+		return
+	}
+	_ = w.store.SetRefreshError(ctx, j.ID, "")
+}
