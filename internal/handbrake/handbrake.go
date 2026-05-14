@@ -155,7 +155,7 @@ func Run(ctx context.Context, input string, s Settings, onProgress func(Progress
 			buf.WriteString(line)
 			buf.WriteByte('\n')
 			bufMu.Unlock()
-			fmt.Fprintln(mirror, line)
+			_, _ = fmt.Fprintln(mirror, line)
 			if parseProgress && onProgress != nil {
 				if p, ok := parseProgressLine(line); ok {
 					onProgress(p)

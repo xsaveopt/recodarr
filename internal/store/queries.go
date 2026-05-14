@@ -122,7 +122,7 @@ func (s *Store) GetAllSettings(ctx context.Context) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := make(map[string]string)
 	for rows.Next() {
 		var k, v string
@@ -141,7 +141,7 @@ func (s *Store) ListArrInstances(ctx context.Context) ([]ArrInstanceRow, error) 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []ArrInstanceRow
 	for rows.Next() {
 		var r ArrInstanceRow
@@ -235,7 +235,7 @@ func (s *Store) ListQbitInstances(ctx context.Context) ([]QbitInstanceRow, error
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []QbitInstanceRow
 	for rows.Next() {
 		var r QbitInstanceRow
@@ -299,7 +299,7 @@ func (s *Store) ListProfiles(ctx context.Context) ([]ProfileRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []ProfileRow
 	for rows.Next() {
 		r, err := scanProfile(rows.Scan)
@@ -351,7 +351,7 @@ func (s *Store) ListTagMappings(ctx context.Context) ([]TagMappingRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []TagMappingRow
 	for rows.Next() {
 		var r TagMappingRow
@@ -371,7 +371,7 @@ func (s *Store) ListTagMappingsByKind(ctx context.Context, kind string) ([]TagMa
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []TagMappingRow
 	for rows.Next() {
 		var r TagMappingRow
@@ -405,7 +405,7 @@ func (s *Store) ListJobs(ctx context.Context) ([]JobRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []JobRow
 	for rows.Next() {
 		r, err := scanJob(rows.Scan)
@@ -456,7 +456,7 @@ func (s *Store) JobsByStatus(ctx context.Context, status string, limit int) ([]J
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []JobRow
 	for rows.Next() {
 		r, err := scanJob(rows.Scan)
@@ -476,7 +476,7 @@ func (s *Store) RecoverOrphanEncoding(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var paths []string
 	for rows.Next() {
 		var p string

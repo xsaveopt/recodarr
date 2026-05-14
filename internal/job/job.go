@@ -397,10 +397,13 @@ func (w *Worker) runOneEncode(ctx context.Context) {
 // checkDiskSpace verifies the directory containing path has at least 1.1× needed bytes free.
 func checkDiskSpace(path string, needed int64) error {
 	var stat syscall.Statfs_t
-	if err := syscall.Statfs(filepath.Dir(path), &stat); err != nil {
-		return nil // can't stat — proceed and let HandBrake fail if truly out of space
+	// Can't stat the FS (rare). Don't block the encode on it; HandBrake will
+	// fail clearly if the disk really is too small.
+	if err := syscall.Statfs(filepath.Dir(path), &stat); err != nil { //nolint:nilerr // intentional: best-effort precheck
+		slog.Debug("statfs failed, skipping disk-space check", "path", path, "err", err)
+		return nil
 	}
-	available := int64(stat.Bavail) * int64(stat.Bsize)
+	available := int64(stat.Bavail) * int64(stat.Bsize) //nolint:unconvert // Bavail/Bsize types differ across GOOS
 	required := needed + needed/10 // 110% of source size
 	if available < required {
 		return fmt.Errorf("insufficient disk space: need %s, have %s",

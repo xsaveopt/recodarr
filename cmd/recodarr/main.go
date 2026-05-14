@@ -43,7 +43,7 @@ func main() {
 		logger.Error("open store", "err", err)
 		os.Exit(1)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	// Best-effort cleanup of expired session rows on boot.
 	_ = auth.New(st.DB).PurgeExpiredSessions(context.Background())
@@ -123,9 +123,10 @@ func runResetAdmin(dataDir string) {
 		slog.Error("open store", "err", err)
 		os.Exit(1)
 	}
-	defer st.Close()
-	if err := auth.New(st.DB).ResetAdmin(context.Background()); err != nil {
-		slog.Error("reset admin", "err", err)
+	resetErr := auth.New(st.DB).ResetAdmin(context.Background())
+	_ = st.Close()
+	if resetErr != nil {
+		slog.Error("reset admin", "err", resetErr)
 		os.Exit(1)
 	}
 	slog.Info("admin user removed; visit the app to set up a new one")
@@ -143,7 +144,7 @@ Env:
   RECODARR_DATA_DIR  data directory (default /data)
   RECODARR_ADDR      listen address (default :8080)
 `
-	os.Stdout.WriteString(usage)
+	_, _ = os.Stdout.WriteString(usage)
 }
 
 func envOr(key, fallback string) string {

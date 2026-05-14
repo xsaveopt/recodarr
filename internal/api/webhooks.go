@@ -171,7 +171,7 @@ func sanitizeMediaPath(p string) (string, error) {
 	clean := filepath.Clean(p)
 	for _, seg := range strings.Split(clean, string(filepath.Separator)) {
 		if seg == ".." {
-			return "", fmt.Errorf("contains ..")
+			return "", fmt.Errorf("contains parent-dir segment")
 		}
 	}
 	return clean, nil
