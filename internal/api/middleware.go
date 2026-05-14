@@ -50,6 +50,21 @@ func securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
+// maxBody caps r.Body to n bytes. Decoders see io.ErrUnexpectedEOF when the
+// limit is hit and respond with a 4xx; without this, an attacker (or a bug)
+// could OOM the process by streaming a huge body. 1 MiB is plenty for our
+// JSON DTOs and *arr webhook payloads.
+func maxBody(n int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Body != nil {
+				r.Body = http.MaxBytesReader(w, r.Body, n)
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // requireCustomHeader rejects mutating requests that don't carry a custom header.
 // Browsers won't send custom headers cross-origin without a CORS preflight (which
 // we don't allow), so this defeats classic form-based CSRF.

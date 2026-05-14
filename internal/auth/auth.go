@@ -3,7 +3,7 @@
 // Storage: admin_users (one row, by design) + sessions (random opaque tokens, server-side
 // lookup, no JWT). Sessions live in SQLite so revocation is trivial — delete the row.
 //
-// Cookie: HttpOnly, SameSite=Lax, Secure if request was HTTPS. Path=/. The cookie value is
+// Cookie: HttpOnly, SameSite=Strict, Secure if request was HTTPS. Path=/. The cookie value is
 // 32 random bytes hex-encoded; never the user id, never bcrypt output.
 package auth
 
@@ -47,25 +47,32 @@ func (s *Store) HasAdmin(ctx context.Context) (bool, error) {
 
 // CreateAdmin creates the admin user. Fails if any admin already exists — the reset
 // flow (CLI subcommand) must wipe the row first.
+//
+// The INSERT is conditional on the table being empty so two simultaneous setup
+// requests can't each insert a different admin row (TOCTOU on HasAdmin).
 func (s *Store) CreateAdmin(ctx context.Context, username, password string) error {
 	if username == "" || password == "" {
 		return errors.New("username and password required")
-	}
-	exists, err := s.HasAdmin(ctx)
-	if err != nil {
-		return err
-	}
-	if exists {
-		return ErrAlreadySetup
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
 	if err != nil {
 		return err
 	}
-	_, err = s.DB.ExecContext(ctx,
-		`INSERT INTO admin_users (username, password_hash) VALUES (?, ?)`,
+	res, err := s.DB.ExecContext(ctx,
+		`INSERT INTO admin_users (username, password_hash)
+		 SELECT ?, ? WHERE NOT EXISTS (SELECT 1 FROM admin_users)`,
 		username, string(hash))
-	return err
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrAlreadySetup
+	}
+	return nil
 }
 
 // VerifyPassword checks credentials. Returns the user id on success.

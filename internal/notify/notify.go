@@ -7,9 +7,14 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/sratabix/recodarr/internal/store"
 )
+
+// notifyClient bounds outbound notify requests so a slow/hanging endpoint
+// can't pin a worker goroutine indefinitely.
+var notifyClient = &http.Client{Timeout: 10 * time.Second}
 
 // Send fires a notification webhook if configured and the given status matches the user's prefs.
 // Compatible with ntfy, Gotify, and any generic JSON webhook.
@@ -64,7 +69,7 @@ func Send(ctx context.Context, st *store.Store, title, status, filePath string, 
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := notifyClient.Do(req)
 	if err != nil {
 		slog.Warn("notify: send", "err", err)
 		return

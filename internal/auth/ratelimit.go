@@ -10,6 +10,9 @@ import (
 // Successful logins reset the counter for that key.
 //
 // Single-admin app, single process: in-memory is fine, no need for Redis.
+//
+// The map is bounded (maxEntries) and expired entries are swept opportunistically
+// on writes so an attacker spraying random IPs can't grow it without bound.
 type LoginLimiter struct {
 	mu      sync.Mutex
 	entries map[string]*loginEntry
@@ -19,6 +22,16 @@ type loginEntry struct {
 	failures int
 	nextOK   time.Time
 }
+
+const (
+	// maxEntries caps tracked client IPs. Reaching the cap drops the oldest
+	// (lowest nextOK) entry to make room.
+	maxEntries = 4096
+	// retentionAfterReady is how long an entry sticks around once its backoff
+	// expires. Long enough to keep the failure count meaningful for a returning
+	// attacker, short enough to bound memory.
+	retentionAfterReady = 1 * time.Hour
+)
 
 func NewLoginLimiter() *LoginLimiter {
 	return &LoginLimiter{entries: make(map[string]*loginEntry)}
@@ -46,11 +59,44 @@ func (l *LoginLimiter) RegisterFailure(key string) {
 	defer l.mu.Unlock()
 	e := l.entries[key]
 	if e == nil {
+		l.sweepLocked()
+		if len(l.entries) >= maxEntries {
+			l.evictOldestLocked()
+		}
 		e = &loginEntry{}
 		l.entries[key] = e
 	}
 	e.failures++
 	e.nextOK = time.Now().Add(backoffFor(e.failures))
+}
+
+// sweepLocked drops entries whose backoff expired more than retentionAfterReady ago.
+// Cheap O(n) walk run only on insert, so amortized fine.
+func (l *LoginLimiter) sweepLocked() {
+	cutoff := time.Now().Add(-retentionAfterReady)
+	for k, e := range l.entries {
+		if e.nextOK.Before(cutoff) {
+			delete(l.entries, k)
+		}
+	}
+}
+
+// evictOldestLocked removes the entry with the smallest nextOK. Called only when
+// the map hits maxEntries after a sweep, i.e. a sustained spoofed-IP flood.
+func (l *LoginLimiter) evictOldestLocked() {
+	var oldestKey string
+	var oldest time.Time
+	first := true
+	for k, e := range l.entries {
+		if first || e.nextOK.Before(oldest) {
+			oldestKey = k
+			oldest = e.nextOK
+			first = false
+		}
+	}
+	if oldestKey != "" {
+		delete(l.entries, oldestKey)
+	}
 }
 
 // Reset clears the throttle for key (call on successful login).

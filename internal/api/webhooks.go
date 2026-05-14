@@ -62,9 +62,10 @@ func handleArrWebhook(st *store.Store, kind arr.Kind) http.HandlerFunc {
 			inst.WebhookSecret == "" ||
 			subtle.ConstantTimeCompare([]byte(user), []byte(WebhookBasicAuthUser)) != 1 ||
 			subtle.ConstantTimeCompare([]byte(pass), []byte(inst.WebhookSecret)) != 1 {
+			// Don't log attacker-controlled creds; just record that auth failed.
 			slog.Warn("webhook: auth failed",
 				"kind", kind, "id", instID,
-				"hasAuthHeader", ok, "user", user)
+				"hasAuthHeader", ok)
 			w.Header().Set("WWW-Authenticate", `Basic realm="recodarr"`)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
