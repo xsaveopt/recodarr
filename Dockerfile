@@ -88,7 +88,7 @@ RUN echo "deb http://deb.debian.org/debian trixie main contrib non-free non-free
         libnuma1 libass9 libfontconfig1 libfreetype6 libfribidi0 \
         libharfbuzz0b libjansson4 libxml2 libgnutls30 \
         libmp3lame0 libopus0 libtheora0 libvorbisenc2 libvorbis0a \
-        libsamplerate0 libspeex1 \
+        libsamplerate0 libspeex1 libvpx9 libx264-164 libturbojpeg0 \
         # Intel/AMD VAAPI + QSV runtime
         libva-drm2 libva2 libvpl2 vainfo \
         intel-media-va-driver \
