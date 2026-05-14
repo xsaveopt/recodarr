@@ -160,15 +160,6 @@ async function openConnect(row: ArrInstance) {
   }
 }
 
-async function copy(text: string, label: string) {
-  try {
-    await navigator.clipboard.writeText(text);
-    notify.success(`${label} copied`);
-  } catch {
-    notify.info("Clipboard blocked — select and copy manually");
-  }
-}
-
 function relativeTime(ms: number): string {
   const diff = Math.floor((Date.now() - ms) / 1000);
   if (diff < 60) return `${diff}s ago`;
@@ -265,47 +256,17 @@ onMounted(() => {
 
         <label class="connect-row">
           <span>URL</span>
-          <div class="copyable">
-            <code>{{ webhookURL(connectFor) }}</code>
-            <Button
-              text
-              size="small"
-              icon="pi pi-copy"
-              title="Copy URL"
-              @click="copy(webhookURL(connectFor), 'Webhook URL')"
-            />
-          </div>
+          <code class="copyable">{{ webhookURL(connectFor) }}</code>
         </label>
 
         <label class="connect-row">
           <span>Username</span>
-          <div class="copyable">
-            <code>{{ connectUser || 'recodarr' }}</code>
-            <Button
-              text
-              size="small"
-              icon="pi pi-copy"
-              title="Copy username"
-              :disabled="!connectUser"
-              @click="copy(connectUser, 'Username')"
-            />
-          </div>
+          <code class="copyable">{{ connectUser || 'recodarr' }}</code>
         </label>
 
         <label class="connect-row">
           <span>Password</span>
-          <div class="copyable">
-            <code v-if="connectLoading" class="muted">loading…</code>
-            <code v-else>{{ connectPass }}</code>
-            <Button
-              text
-              size="small"
-              icon="pi pi-copy"
-              title="Copy password"
-              :disabled="!connectPass"
-              @click="copy(connectPass, 'Password')"
-            />
-          </div>
+          <code class="copyable">{{ connectLoading ? 'loading…' : connectPass }}</code>
         </label>
       </div>
       <template #footer>
@@ -425,21 +386,16 @@ onMounted(() => {
   gap: 0.75rem;
 }
 .copyable {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
+  display: block;
   background: var(--app-row-alt);
   border: 1px solid var(--app-panel-border);
   border-radius: 6px;
-  padding: 0.25rem 0.5rem;
-  min-width: 0;
-}
-.copyable code {
-  font-size: 0.8rem;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.85rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   word-break: break-all;
-  flex: 1;
-  background: none;
-  padding: 0;
+  user-select: all;          /* one click selects the whole value */
+  cursor: text;
 }
 .test-ok {
   font-size: 0.85rem;

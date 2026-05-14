@@ -43,47 +43,63 @@ func handleArrWebhook(st *store.Store, kind arr.Kind) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		instID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 		if err != nil {
+			slog.Warn("webhook: bad instance id in URL", "kind", kind, "raw", chi.URLParam(r, "id"))
 			http.Error(w, "bad instance id", http.StatusBadRequest)
 			return
 		}
+
+		// Resolve instance + auth FIRST, before reading the body. We don't want to
+		// parse untrusted JSON for unauthenticated callers, and we want to fail-fast
+		// when the URL points at a deleted/disabled row.
+		inst, instErr := loadArrInstance(r.Context(), st, instID, string(kind))
+		if instErr != nil {
+			slog.Warn("webhook: instance lookup failed", "kind", kind, "id", instID, "err", instErr)
+			respondInstanceError(w, instErr)
+			return
+		}
+		user, pass, ok := r.BasicAuth()
+		if !ok ||
+			inst.WebhookSecret == "" ||
+			subtle.ConstantTimeCompare([]byte(user), []byte(WebhookBasicAuthUser)) != 1 ||
+			subtle.ConstantTimeCompare([]byte(pass), []byte(inst.WebhookSecret)) != 1 {
+			slog.Warn("webhook: auth failed",
+				"kind", kind, "id", instID,
+				"hasAuthHeader", ok, "user", user)
+			w.Header().Set("WWW-Authenticate", `Basic realm="recodarr"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
+			slog.Warn("webhook: read body failed", "kind", kind, "id", instID, "err", err)
 			http.Error(w, "read body", http.StatusBadRequest)
 			return
 		}
 		item, err := arr.ParseWebhook(kind, body)
 		if err != nil {
+			slog.Warn("webhook: parse failed; rejecting payload",
+				"kind", kind, "id", instID,
+				"err", err,
+				"contentType", r.Header.Get("Content-Type"),
+				"bodySnippet", snippet(body, 512),
+			)
 			http.Error(w, "bad payload", http.StatusBadRequest)
 			return
 		}
-		// Auth: HTTP Basic. Username is always "recodarr"; password is the per-instance
-		// webhook_secret (auto-generated on insert). Sonarr/Radarr's webhook UI has
-		// first-class Username/Password fields, so this is the friction-free path.
-		// Constant-time compare on both fields to avoid timing oracles.
-		inst, instErr := loadArrInstance(r.Context(), st, instID, string(kind))
-		if instErr == nil {
-			user, pass, ok := r.BasicAuth()
-			expectedUser := []byte(WebhookBasicAuthUser)
-			expectedPass := []byte(inst.WebhookSecret)
-			if !ok ||
-				inst.WebhookSecret == "" ||
-				subtle.ConstantTimeCompare([]byte(user), expectedUser) != 1 ||
-				subtle.ConstantTimeCompare([]byte(pass), expectedPass) != 1 {
-				w.Header().Set("WWW-Authenticate", `Basic realm="recodarr"`)
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
-				return
-			}
-		}
+		slog.Info("webhook received",
+			"kind", kind, "id", instID,
+			"event", item.EventType,
+			"title", item.ParentTitle,
+			"size", item.Size,
+		)
 		if item.EventType == "Test" {
 			writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 			return
 		}
 		if !processableEvents[item.EventType] {
+			slog.Info("webhook: event ignored", "kind", kind, "event", item.EventType)
 			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		if instErr != nil {
-			respondInstanceError(w, instErr)
 			return
 		}
 		profileID, ok := findTagProfile(r.Context(), st, inst, item.ParentTags)
@@ -187,6 +203,14 @@ func sanitizeMediaPath(p string) (string, error) {
 		}
 	}
 	return clean, nil
+}
+
+// snippet returns up to n bytes of body for logging without dumping huge payloads.
+func snippet(b []byte, n int) string {
+	if len(b) > n {
+		return string(b[:n]) + "...(truncated)"
+	}
+	return string(b)
 }
 
 func enqueueIfNew(ctx context.Context, st *store.Store, jr store.JobRow) (int64, error) {

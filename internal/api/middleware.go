@@ -1,6 +1,32 @@
 package api
 
-import "net/http"
+import (
+	"log/slog"
+	"net/http"
+	"time"
+
+	"github.com/go-chi/chi/v5/middleware"
+)
+
+// requestLogger logs every HTTP request through slog so they show up next to
+// the rest of the application logs (and in `docker logs`). Wraps the response
+// writer to capture the actual status code we sent back.
+func requestLogger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+		start := time.Now()
+		next.ServeHTTP(ww, r)
+		slog.Info("http",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", ww.Status(),
+			"bytes", ww.BytesWritten(),
+			"dur_ms", time.Since(start).Milliseconds(),
+			"remote", r.RemoteAddr,
+			"ua", r.UserAgent(),
+		)
+	})
+}
 
 // securityHeaders sets a conservative baseline of security-relevant response headers.
 // CSP is strict but allows the inline styles PrimeVue injects at runtime.

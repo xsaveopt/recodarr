@@ -19,6 +19,7 @@ func NewRouter(st *store.Store, worker *job.Worker, assets fs.FS) http.Handler {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
+	r.Use(requestLogger)
 	r.Use(securityHeaders)
 
 	a := auth.New(st.DB)

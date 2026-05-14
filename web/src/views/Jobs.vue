@@ -18,17 +18,6 @@ const busy = ref<Set<number>>(new Set());
 const titleFilter = ref("");
 const statusFilter = ref<string>("");
 const logJob = ref<Job | null>(null);
-
-async function copyLog() {
-  if (!logJob.value) return;
-  const text = `Job #${logJob.value.id} — ${logJob.value.title}\n\nError: ${logJob.value.error || "(none)"}\n\nLog:\n${logJob.value.encodeLog || "(empty)"}`;
-  try {
-    await navigator.clipboard.writeText(text);
-    notify.success("Log copied");
-  } catch {
-    notify.info("Clipboard blocked — select manually");
-  }
-}
 let timer: number | null = null;
 
 const statusOptions = [
@@ -270,7 +259,6 @@ onUnmounted(() => {
         <pre class="log-pre">{{ logJob.encodeLog || "(no captured output)" }}</pre>
       </div>
       <template #footer>
-        <Button text label="Copy" icon="pi pi-copy" @click="copyLog" />
         <Button label="Close" @click="logJob = null" />
       </template>
     </Dialog>
