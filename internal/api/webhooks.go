@@ -165,15 +165,16 @@ func respondInstanceError(w http.ResponseWriter, err error) {
 }
 
 // findTagProfile checks the item's tags against global tag→profile mappings for this kind.
+// Match is by tag *label* (string), since *arr webhooks serialize tags as labels.
 // Items with no matching tag are silently skipped (returns false).
-func findTagProfile(ctx context.Context, st *store.Store, inst *store.ArrInstanceRow, itemTags []int64) (sql.NullInt64, bool) {
+func findTagProfile(ctx context.Context, st *store.Store, inst *store.ArrInstanceRow, itemTags []string) (sql.NullInt64, bool) {
 	mappings, err := st.ListTagMappingsByKind(ctx, inst.Kind)
 	if err != nil || len(mappings) == 0 {
 		return sql.NullInt64{}, false
 	}
-	m := make(map[int64]int64, len(mappings))
+	m := make(map[string]int64, len(mappings))
 	for _, mp := range mappings {
-		m[mp.TagID] = mp.ProfileID
+		m[mp.TagLabel] = mp.ProfileID
 	}
 	for _, t := range itemTags {
 		if pid, ok := m[t]; ok {

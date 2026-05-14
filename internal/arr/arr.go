@@ -45,12 +45,16 @@ type Tag struct {
 
 // Item is the normalized form of a Sonarr/Radarr webhook payload — only the fields
 // Recodarr actually consumes.
+//
+// ParentTags holds tag *labels* (strings), not IDs. *arr's webhook payloads
+// serialize series.tags / movie.tags as a list of labels regardless of how the
+// tags are stored internally; matching is therefore done by label.
 type Item struct {
 	EventType    string
 	ParentID     int64    // seriesId or movieId
 	ParentTitle  string
 	ParentPath   string
-	ParentTags   []int64
+	ParentTags   []string
 	FileID       int64    // episodeFileId or movieFileId
 	FilePath     string   // absolute, when present
 	RelativePath string   // path relative to ParentPath
@@ -142,7 +146,7 @@ type sonarrPayload struct {
 		ID    int64   `json:"id"`
 		Title string  `json:"title"`
 		Path  string  `json:"path"`
-		Tags  []int64 `json:"tags,omitempty"`
+		Tags  []string `json:"tags,omitempty"`
 	} `json:"series"`
 	EpisodeFile struct {
 		ID           int64  `json:"id"`
@@ -156,10 +160,10 @@ type sonarrPayload struct {
 type radarrPayload struct {
 	EventType string `json:"eventType"`
 	Movie     struct {
-		ID    int64   `json:"id"`
-		Title string  `json:"title"`
-		Path  string  `json:"path"`
-		Tags  []int64 `json:"tags,omitempty"`
+		ID         int64    `json:"id"`
+		Title      string   `json:"title"`
+		FolderPath string   `json:"folderPath"` // Radarr's "path" equivalent on movies
+		Tags       []string `json:"tags,omitempty"`
 	} `json:"movie"`
 	MovieFile struct {
 		ID           int64  `json:"id"`
@@ -199,7 +203,7 @@ func ParseWebhook(kind Kind, body []byte) (*Item, error) {
 			EventType:    p.EventType,
 			ParentID:     p.Movie.ID,
 			ParentTitle:  p.Movie.Title,
-			ParentPath:   p.Movie.Path,
+			ParentPath:   p.Movie.FolderPath,
 			ParentTags:   p.Movie.Tags,
 			FileID:       p.MovieFile.ID,
 			FilePath:     p.MovieFile.Path,
