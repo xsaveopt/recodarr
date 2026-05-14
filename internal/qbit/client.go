@@ -44,7 +44,7 @@ func (c *Client) Login(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK || strings.TrimSpace(string(body)) != "Ok." {
 		return fmt.Errorf("qbit login failed: status=%d body=%q", resp.StatusCode, string(body))
@@ -70,7 +70,7 @@ func (c *Client) TorrentByHash(ctx context.Context, hash string) (*Torrent, erro
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("qbit torrents/info: status=%d", resp.StatusCode)
 	}
