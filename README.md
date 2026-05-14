@@ -28,37 +28,13 @@ services:
       - ./recodarr-data:/data
       # Paths inside the container must match what Sonarr/Radarr send.
       - /srv/media:/srv/media
-    # Intel iGPU (QSV/VAAPI), uncomment for hardware acceleration:
-    # devices:
-    #   - /dev/dri:/dev/dri
-    # group_add:
-    #   - "104"   # render, match host: getent group render | cut -d: -f3
-    #   - "44"    # video
 ```
 
 ```bash
 docker compose up -d
 ```
 
-### NVIDIA NVENC
-
-Install `nvidia-container-toolkit` on the host (see NVIDIA's docs for your distro) and run `sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker`. Then add to the service:
-
-```yaml
-    environment:
-      TZ: Europe/Amsterdam
-      NVIDIA_VISIBLE_DEVICES: all
-      NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-```
-
-Pick the `nvenc_*` encoders in your HandBrake profile. Verify on Settings, Debug that NVENC is detected.
+See the GPU acceleration section below to add hardware encode/decode.
 
 ## Wiring it up
 
@@ -86,11 +62,66 @@ Settings, Worker. Set a start and end time in `HH:MM` to restrict when encodes c
 
 Failed jobs are listed on the Jobs page. Click the error message to see the full HandBrake output. Use Retry to re-queue. A job that fails to start five times in a row is given up on automatically; retrying resets the counter. If the encode succeeds but the *arr refresh call fails, the job is marked done and the refresh error is shown next to it.
 
-## Hardware acceleration
+## GPU acceleration
 
-The image ships with VAAPI and QSV runtime libraries. For Intel/AMD pass `/dev/dri` through and add your host's `render` group GID via `group_add`. For NVIDIA install `nvidia-container-toolkit` on the host and add a `deploy.resources.reservations.devices` block. Apple VideoToolbox only works when running the binary natively on macOS.
+The image is built with hardware encode and decode for all three vendors. Add the snippet for your card to the `recodarr` service in `docker-compose.yml`, then pick the matching encoder in your HandBrake profile. Verify the GPU is detected on Settings, Debug.
 
-Check Settings, Debug to verify the detected encoders.
+For each vendor: encoder names use that family's prefix (`nvenc_`, `qsv_`, `vce_`). Decode is automatic on the same family if you tick **Hardware Decode** in the profile.
+
+### NVIDIA (NVENC + NVDEC)
+
+Host: install `nvidia-container-toolkit`, then `sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker`. Verify with `nvidia-smi` on the host.
+
+```yaml
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+```
+
+Encoders: `nvenc_h264`, `nvenc_h265`, `nvenc_h265_10bit`, `nvenc_av1` (Ada and newer).
+
+Pascal cards (P4/P40/P100/GTX 10xx) do not support `temporal-aq=1`, HEVC B-frames, or AV1. Stick to `spatial-aq=1:rc-lookahead=16` in extra args, leave Tune empty, and pick the `slow` or `medium` preset.
+
+### Intel (QSV + VAAPI)
+
+Host: nothing special. Confirm `/dev/dri/renderD128` exists.
+
+```yaml
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "104"   # render, match host: getent group render | cut -d: -f3
+      - "44"    # video
+```
+
+Encoders: `qsv_h264`, `qsv_h265`, `qsv_h265_10bit`, `qsv_av1` (Arc / 11th-gen+).
+
+Older iGPUs (Haswell through Skylake) only do H.264 reliably; HEVC needs Kaby Lake or newer.
+
+### AMD (VCE via VAAPI)
+
+Host: nothing special. Confirm `/dev/dri/renderD128` exists.
+
+```yaml
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "104"
+      - "44"
+```
+
+Encoders: `vce_h264`, `vce_h265`, `vce_h265_10bit`, `vce_av1` (RX 7000 series and newer).
+
+### Apple
+
+VideoToolbox only works when running the Recodarr binary natively on macOS, not in a Linux container. Not supported in Docker.
 
 ## Image tags
 

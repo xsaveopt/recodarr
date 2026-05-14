@@ -33,14 +33,15 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 #    bottleneck. Building from source with --enable-nvdec fixes that.
 #    nv-codec-headers gives us the NVENC/NVDEC SDK headers without dragging in
 #    the full multi-GB CUDA toolkit.
-#    Builder base must match the runtime base (debian:bookworm-slim) so the
-#    binary's glibc requirements line up — building on Ubuntu 24.04 produces
-#    a binary linked against glibc 2.39 that won't run on bookworm's 2.36.
-FROM debian:bookworm-slim AS handbrake-builder
+#    Builder base must match the runtime base (debian:trixie-slim) so the
+#    binary's glibc requirements line up. Trixie ships gcc 13, which avoids a
+#    gcc-12 -Wmaybe-uninitialized false positive in zimg's AVX-512 intrinsics
+#    that breaks the build on bookworm.
+FROM debian:trixie-slim AS handbrake-builder
 ARG HANDBRAKE_VERSION
 ARG NVCODEC_HEADERS_VERSION
 ENV DEBIAN_FRONTEND=noninteractive
-RUN echo "deb http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware" > /etc/apt/sources.list \
+RUN echo "deb http://deb.debian.org/debian trixie main contrib non-free non-free-firmware" > /etc/apt/sources.list \
     && apt-get update && apt-get install -y --no-install-recommends \
         autoconf automake build-essential ca-certificates cmake git \
         libass-dev libbz2-dev libfontconfig1-dev libfreetype6-dev libfribidi-dev \
@@ -70,16 +71,16 @@ RUN ./configure --launch-jobs=$(nproc) --launch \
     && cp build/HandBrakeCLI /HandBrakeCLI \
     && strip /HandBrakeCLI
 
-# 4. Runtime — Debian bookworm-slim with HandBrakeCLI + Intel/AMD VAAPI/QSV libs.
+# 4. Runtime — Debian trixie-slim with HandBrakeCLI + Intel/AMD VAAPI/QSV libs.
 #    NVENC/NVDEC work at runtime via nvidia-container-toolkit; the toolkit
 #    injects libcuda + libnvcuvid + libnvidia-encode based on the container's
 #    NVIDIA_DRIVER_CAPABILITIES env var (must include compute,video,utility).
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 ENV DEBIAN_FRONTEND=noninteractive \
     RECODARR_DATA_DIR=/data \
     RECODARR_ADDR=:8080
 
-RUN echo "deb http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware" > /etc/apt/sources.list \
+RUN echo "deb http://deb.debian.org/debian trixie main contrib non-free non-free-firmware" > /etc/apt/sources.list \
     && apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates tzdata \
         # HandBrake runtime shared libraries (most contrib deps are statically
