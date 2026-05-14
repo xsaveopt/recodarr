@@ -66,14 +66,19 @@ func (c *Client) Login(ctx context.Context) error {
 		)
 	}
 	switch {
-	case resp.StatusCode == http.StatusOK && trimmed == "Ok.":
-		return nil
+	// Explicit failure: qBit returned 200 with the literal "Fails." body.
 	case resp.StatusCode == http.StatusOK && trimmed == "Fails.":
 		return fmt.Errorf("qbit rejected credentials (wrong username or password)")
+	// Any 2xx is treated as success. 200 + "Ok." is the normal login response;
+	// 204 No Content is what qBit returns when the client IP is in the
+	// "Bypass authentication for clients on whitelisted IP subnets" list and no
+	// login is required.
+	case resp.StatusCode >= 200 && resp.StatusCode < 300:
+		return nil
 	case resp.StatusCode == http.StatusForbidden:
 		return fmt.Errorf("qbit returned 403 (likely IP-banned after failed attempts; restart qBittorrent or wait the ban out)")
 	case resp.StatusCode == http.StatusUnauthorized:
-		return fmt.Errorf(`qbit returned 401. Most likely qBit's "Server domains" (Tools → Options → Web UI) is set to something restrictive that excludes %q. Default is "*" which allows everything. Body: %q`, hostOnly(c.baseURL), trimmed)
+		return fmt.Errorf(`qbit returned 401. Most likely qBit's "Server domains" (Tools → Options → Web UI) is set to something restrictive that excludes %q, or there's a port mismatch between qBit's bind port and the URL host. Body: %q`, hostOnly(c.baseURL), trimmed)
 	default:
 		return fmt.Errorf("qbit login failed: status=%d body=%q", resp.StatusCode, trimmed)
 	}
