@@ -254,8 +254,19 @@ func buildArgs(input, output string, s Settings) []string {
 	if s.TwoPass {
 		args = append(args, "--two-pass", "--turbo")
 	}
-	if strings.HasPrefix(encoder, "qsv_") {
-		args = append(args, "--enable-qsv-decoding")
+	// Auto-enable matching hardware decoder so the GPU does both decode and encode
+	// (zero-copy pipeline). HandBrake silently falls back to software decode if the
+	// input codec isn't supported by the chosen NVDEC/QSV/VAAPI backend, so this is
+	// safe to always do when the encoder is hardware.
+	switch {
+	case strings.HasPrefix(encoder, "nvenc_"):
+		args = append(args, "--enable-hw-decoding", "nvdec")
+	case strings.HasPrefix(encoder, "qsv_"):
+		args = append(args, "--enable-hw-decoding", "qsv")
+	case strings.HasPrefix(encoder, "vce_") || strings.HasPrefix(encoder, "vt_"):
+		// AMD VCE on Linux goes through VAAPI; Apple VideoToolbox is its own thing
+		// but HandBrake exposes it via the same flag.
+		args = append(args, "--enable-hw-decoding", "vaapi")
 	}
 	if s.Framerate != "" {
 		args = append(args, "-r", s.Framerate)
