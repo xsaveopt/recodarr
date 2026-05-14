@@ -3,7 +3,6 @@
 ARG NODE_VERSION=24
 ARG GO_VERSION=1.26
 ARG HANDBRAKE_VERSION=1.11.1
-ARG NVCODEC_HEADERS_VERSION=n12.2.72.0
 
 # 1. Build the Vue SPA
 FROM node:${NODE_VERSION}-alpine AS web-builder
@@ -39,7 +38,6 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 #    that breaks the build on bookworm.
 FROM debian:trixie-slim AS handbrake-builder
 ARG HANDBRAKE_VERSION
-ARG NVCODEC_HEADERS_VERSION
 ENV DEBIAN_FRONTEND=noninteractive
 RUN echo "deb http://deb.debian.org/debian trixie main contrib non-free non-free-firmware" > /etc/apt/sources.list \
     && apt-get update && apt-get install -y --no-install-recommends \
@@ -53,18 +51,25 @@ RUN echo "deb http://deb.debian.org/debian trixie main contrib non-free non-free
         libdrm-dev libva-dev libvpl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install nv-codec-headers (NVENC + NVDEC SDK headers, no CUDA install needed).
-RUN git clone --depth=1 -b ${NVCODEC_HEADERS_VERSION} \
-        https://github.com/FFmpeg/nv-codec-headers.git /tmp/nvcodec \
-    && make -C /tmp/nvcodec install \
-    && rm -rf /tmp/nvcodec
-
 # Build HandBrakeCLI. --launch fetches and statically links HandBrake's contrib
-# deps (x265, dav1d, ffmpeg, etc.) so the resulting binary has minimal runtime
-# library requirements.
+# deps (x265, dav1d, ffmpeg, nv-codec-headers, etc.) so the resulting binary has
+# minimal runtime library requirements.
 RUN git clone --depth=1 -b ${HANDBRAKE_VERSION} \
         https://github.com/HandBrake/HandBrake.git /hb
 WORKDIR /hb
+
+# Pin nv-codec-headers to the API-12.2 line (n12.2.72.0). HandBrake 1.10+ ships
+# 13.0.19.0 by default, which requires NVIDIA driver 570+. The 12.2 headers
+# work with driver 550+ which covers Tesla P4 / Pascal hosts in the wild. The
+# old contribs2 mirror URL doesn't host the older tarball anymore, so we point
+# both URLs at FFmpeg's release archive directly.
+RUN sed -i \
+        -e 's|nv-codec-headers-13\.0\.19\.0|nv-codec-headers-12.2.72.0|g' \
+        -e 's|/n13\.0\.19\.0/|/n12.2.72.0/|g' \
+        -e 's|releases/download/contribs2/nv-codec-headers-12\.2\.72\.0\.tar\.gz|releases/download/n12.2.72.0/nv-codec-headers-12.2.72.0.tar.gz|' \
+        -e 's|13da39edb3a40ed9713ae390ca89faa2f1202c9dda869ef306a8d4383e242bee|c295a2ba8a06434d4bdc5c2208f8a825285210d71d91d572329b2c51fd0d4d03|' \
+        contrib/nvenc/module.defs
+
 RUN ./configure --launch-jobs=$(nproc) --launch \
         --enable-nvenc --enable-nvdec --enable-qsv \
         --disable-gtk \
