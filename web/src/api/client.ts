@@ -59,6 +59,8 @@ export const api = {
     remove: (id: number) => request<void>("DELETE", `/arr-instances/${id}`),
     allTags: () => request<InstanceTag[]>("GET", "/arr-instances/all-tags"),
     test: (id: number) => request<{ ok: boolean; error?: string }>("POST", `/arr-instances/${id}/test`),
+    revealWebhookSecret: (id: number) =>
+      request<{ username: string; password: string }>("GET", `/arr-instances/${id}/webhook-secret`),
   },
   tagMappings: {
     list: () => request<TagMapping[]>("GET", "/tag-mappings"),

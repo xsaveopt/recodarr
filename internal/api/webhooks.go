@@ -27,6 +27,10 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// WebhookBasicAuthUser is the fixed Basic-auth username *arr must send. Pairs
+// with the per-instance webhook_secret as the password.
+const WebhookBasicAuthUser = "recodarr"
+
 // processable event types we react to. Sonarr/Radarr versions vary; accept the union.
 var processableEvents = map[string]bool{
 	"Download":               true,
@@ -52,12 +56,20 @@ func handleArrWebhook(st *store.Store, kind arr.Kind) http.HandlerFunc {
 			http.Error(w, "bad payload", http.StatusBadRequest)
 			return
 		}
-		// Auth: every instance has a webhook_secret (auto-generated on insert) and every
-		// inbound webhook MUST present it. Constant-time compare to avoid timing oracles.
+		// Auth: HTTP Basic. Username is always "recodarr"; password is the per-instance
+		// webhook_secret (auto-generated on insert). Sonarr/Radarr's webhook UI has
+		// first-class Username/Password fields, so this is the friction-free path.
+		// Constant-time compare on both fields to avoid timing oracles.
 		inst, instErr := loadArrInstance(r.Context(), st, instID, string(kind))
 		if instErr == nil {
-			provided := r.Header.Get("X-Webhook-Token")
-			if inst.WebhookSecret == "" || subtle.ConstantTimeCompare([]byte(provided), []byte(inst.WebhookSecret)) != 1 {
+			user, pass, ok := r.BasicAuth()
+			expectedUser := []byte(WebhookBasicAuthUser)
+			expectedPass := []byte(inst.WebhookSecret)
+			if !ok ||
+				inst.WebhookSecret == "" ||
+				subtle.ConstantTimeCompare([]byte(user), expectedUser) != 1 ||
+				subtle.ConstantTimeCompare([]byte(pass), expectedPass) != 1 {
+				w.Header().Set("WWW-Authenticate", `Basic realm="recodarr"`)
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}

@@ -86,18 +86,21 @@ async function save() {
     validationError.value = "API key is required.";
     return;
   }
-  const ok = await notify.tryRun(async () => {
-    if (e.id) {
-      await api.arr.update(e as ArrInstance);
-    } else {
-      await api.arr.create(e as Omit<ArrInstance, "id">);
-    }
-    return true;
+  const isCreate = !e.id;
+  const saved = await notify.tryRun(async () => {
+    return e.id
+      ? await api.arr.update(e as ArrInstance)
+      : await api.arr.create(e as Omit<ArrInstance, "id">);
   }, "Couldn't save instance");
-  if (ok) {
+  if (saved) {
     notify.success(`Saved ${e.name}`);
     editing.value = null;
     await load();
+    // After a fresh create, auto-pop the connect dialog so the user can grab
+    // the auto-generated webhook secret right away.
+    if (isCreate && saved.id) {
+      await openConnect({ ...(saved as ArrInstance) });
+    }
   }
 }
 
@@ -134,6 +137,29 @@ function webhookURL(row: ArrInstance) {
   return `${window.location.origin}/webhook/${row.kind}/${row.id}`;
 }
 
+// "Connect" dialog: shows the webhook URL + Basic-auth username/password.
+const connectFor = ref<ArrInstance | null>(null);
+const connectUser = ref<string>("");
+const connectPass = ref<string>("");
+const connectLoading = ref(false);
+
+async function openConnect(row: ArrInstance) {
+  connectFor.value = row;
+  connectUser.value = "";
+  connectPass.value = "";
+  connectLoading.value = true;
+  try {
+    const r = await api.arr.revealWebhookSecret(row.id);
+    connectUser.value = r.username;
+    connectPass.value = r.password;
+  } catch (e) {
+    notify.error(e);
+    connectFor.value = null;
+  } finally {
+    connectLoading.value = false;
+  }
+}
+
 async function copy(text: string, label: string) {
   try {
     await navigator.clipboard.writeText(text);
@@ -161,9 +187,9 @@ onMounted(() => {
   <div class="panel">
     <div class="panel-head">
       <p class="muted">
-        Sonarr/Radarr instances. Copy the webhook URL into *arr → Settings → Connect → Webhook,
-        and paste the secret into the connection's <code>Headers</code> field as
-        <code>X-Webhook-Token</code>.
+        Sonarr/Radarr instances. After saving, click <strong>Show</strong> to reveal the
+        webhook URL plus the Basic-auth username/password to paste into *arr's
+        Settings → Connect → Webhook.
       </p>
       <Button icon="pi pi-plus" label="Add" @click="startCreate" />
     </div>
@@ -181,18 +207,16 @@ onMounted(() => {
       <Column field="enabled" header="Enabled">
         <template #body="{ data }">{{ data.enabled ? "yes" : "no" }}</template>
       </Column>
-      <Column header="Webhook URL" style="min-width: 24rem">
+      <Column header="Connect" style="width: 8rem">
         <template #body="{ data }">
-          <div class="webhook-cell">
-            <code class="webhook">{{ webhookURL(data) }}</code>
-            <Button
-              text
-              size="small"
-              icon="pi pi-copy"
-              title="Copy URL"
-              @click="copy(webhookURL(data), 'Webhook URL')"
-            />
-          </div>
+          <Button
+            text
+            size="small"
+            icon="pi pi-link"
+            label="Show"
+            title="Show webhook URL & token"
+            @click="openConnect(data)"
+          />
         </template>
       </Column>
       <Column header="Status" style="width: 11rem">
@@ -223,6 +247,71 @@ onMounted(() => {
         </template>
       </Column>
     </DataTable>
+
+    <Dialog
+      :visible="connectFor !== null"
+      @update:visible="(v) => (connectFor = v ? connectFor : null)"
+      modal
+      :header="connectFor ? `Connect ${connectFor.kind} → Recodarr` : ''"
+      :style="{ width: '38rem' }"
+    >
+      <div v-if="connectFor" class="connect-body">
+        <p class="muted small">
+          In <strong>{{ connectFor.kind }}</strong>: Settings → Connect → + → Webhook.
+          Paste the URL, set Method to <strong>POST</strong>, tick
+          <strong>On File Import</strong> (and <strong>On File Upgrade</strong>),
+          then fill in the Username and Password fields below.
+        </p>
+
+        <label class="connect-row">
+          <span>URL</span>
+          <div class="copyable">
+            <code>{{ webhookURL(connectFor) }}</code>
+            <Button
+              text
+              size="small"
+              icon="pi pi-copy"
+              title="Copy URL"
+              @click="copy(webhookURL(connectFor), 'Webhook URL')"
+            />
+          </div>
+        </label>
+
+        <label class="connect-row">
+          <span>Username</span>
+          <div class="copyable">
+            <code>{{ connectUser || 'recodarr' }}</code>
+            <Button
+              text
+              size="small"
+              icon="pi pi-copy"
+              title="Copy username"
+              :disabled="!connectUser"
+              @click="copy(connectUser, 'Username')"
+            />
+          </div>
+        </label>
+
+        <label class="connect-row">
+          <span>Password</span>
+          <div class="copyable">
+            <code v-if="connectLoading" class="muted">loading…</code>
+            <code v-else>{{ connectPass }}</code>
+            <Button
+              text
+              size="small"
+              icon="pi pi-copy"
+              title="Copy password"
+              :disabled="!connectPass"
+              @click="copy(connectPass, 'Password')"
+            />
+          </div>
+        </label>
+      </div>
+      <template #footer>
+        <Button label="Done" @click="connectFor = null" />
+      </template>
+    </Dialog>
 
     <Dialog
       :visible="editing !== null"
@@ -266,7 +355,7 @@ onMounted(() => {
           <ToggleSwitch v-model="editing.enabled" />
         </label>
         <label>
-          <span>Webhook secret</span>
+          <span>Webhook password</span>
           <Password
             v-model="editing.webhookSecret"
             toggleMask
@@ -275,9 +364,9 @@ onMounted(() => {
           />
         </label>
         <p class="muted small">
-          The secret is required on every incoming webhook as
-          <code>X-Webhook-Token: &lt;secret&gt;</code>. If you leave this blank when creating
-          an instance, one is generated for you.
+          Used as the HTTP Basic-auth password for incoming webhooks (username is always
+          <code>recodarr</code>). Leave blank to auto-generate. After saving you'll see
+          a panel with everything you need to paste into *arr.
         </p>
       </div>
       <template #footer>
@@ -324,15 +413,33 @@ onMounted(() => {
 .form label.row {
   grid-template-columns: 9rem auto;
 }
-.webhook-cell {
+.connect-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.connect-row {
+  display: grid;
+  grid-template-columns: 10rem 1fr;
+  align-items: center;
+  gap: 0.75rem;
+}
+.copyable {
   display: flex;
   align-items: center;
   gap: 0.25rem;
+  background: var(--app-row-alt);
+  border: 1px solid var(--app-panel-border);
+  border-radius: 6px;
+  padding: 0.25rem 0.5rem;
+  min-width: 0;
 }
-.webhook {
+.copyable code {
   font-size: 0.8rem;
   word-break: break-all;
   flex: 1;
+  background: none;
+  padding: 0;
 }
 .test-ok {
   font-size: 0.85rem;

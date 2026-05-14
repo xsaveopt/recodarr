@@ -76,15 +76,17 @@ async function submit() {
 .auth-card h1 {
   margin: 0;
 }
-.muted {
-  color: var(--app-muted);
+/* Auth card is always dark — pin readable muted color and code bg. */
+.auth-card .muted {
+  color: #9aa3ad;
   margin: 0;
 }
 .small {
   font-size: 0.85rem;
 }
-code {
+.auth-card code {
   background: #232a36;
+  color: #eaeaea;
   padding: 0.1rem 0.35rem;
   border-radius: 4px;
 }

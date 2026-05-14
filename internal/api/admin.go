@@ -167,6 +167,10 @@ func registerAdminRoutes(r chi.Router, st *store.Store, w workerClient) {
 		r.Delete("/{id}", deleteArrInstance(st))
 		r.Post("/{id}/test", testArrInstance(st))
 		r.Get("/{id}/tags", listArrTags(st))
+		// Reveal endpoint: returns the auto-generated webhook secret so the user
+		// can copy it after saving. The user is the single admin and is already
+		// authenticated, so this is no weaker than the SQLite file itself.
+		r.Get("/{id}/webhook-secret", revealArrWebhookSecret(st))
 	})
 
 	r.Route("/tag-mappings", func(r chi.Router) {
@@ -357,6 +361,25 @@ func listArrTags(st *store.Store) http.HandlerFunc {
 			out = append(out, tagDTO{ID: t.ID, Label: t.Label})
 		}
 		writeJSON(w, http.StatusOK, out)
+	}
+}
+
+func revealArrWebhookSecret(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+		if err != nil {
+			http.Error(w, "bad id", http.StatusBadRequest)
+			return
+		}
+		inst, err := st.GetArrInstance(r.Context(), id)
+		if err != nil {
+			http.Error(w, "instance not found", http.StatusNotFound)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{
+			"username": WebhookBasicAuthUser,
+			"password": inst.WebhookSecret,
+		})
 	}
 }
 

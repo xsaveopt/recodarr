@@ -74,8 +74,10 @@ async function submit() {
   flex-direction: column;
   gap: 0.25rem;
 }
-.muted {
-  color: var(--app-muted);
+/* Auth card is always dark, regardless of OS theme — pin a light muted color
+   so it stays readable on the dark surface. */
+.auth-card .muted {
+  color: #9aa3ad;
   margin: 0;
 }
 </style>

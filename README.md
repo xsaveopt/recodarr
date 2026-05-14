@@ -66,13 +66,13 @@ Pick the `nvenc_*` encoders in your HandBrake profile. Verify on Settings, Debug
 
 2. **qBittorrent**: Settings, qBittorrent. Add your qBit URL and credentials. Without this, jobs sit in `waiting_for_seed` forever.
 
-3. **Sonarr / Radarr**: Settings, Sonarr / Radarr. Add an instance. After saving you'll see a webhook URL like `http://recodarr:8080/webhook/sonarr/1` and a generated webhook secret. In *arr, go to Settings, Connect, add a Webhook with:
-   - URL: the one shown in Recodarr
+3. **Sonarr / Radarr**: Settings, Sonarr / Radarr. Add an instance. After saving, click **Show** on the instance row to reveal the webhook URL plus a generated username and password. In *arr, go to Settings, Connect, add a Webhook with:
+   - URL: as shown
    - Method: POST
    - Triggers: tick **On File Import** (and **On File Upgrade** if you also want re-encodes after a quality upgrade)
-   - Toggle **Show Advanced** at the top of the form to reveal the **Headers** field, then add a row with name `X-Webhook-Token` and value `<the secret>`
+   - Username and Password: as shown
 
-   The secret is required. Webhooks without it are rejected.
+   Auth is required. Unauthenticated webhooks are rejected.
 
 4. **Tag your items**: in *arr, create a tag (e.g. `recodarr`) and apply it to the series or movies you want re-encoded.
 
