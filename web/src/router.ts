@@ -2,8 +2,18 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router"
 import { api } from "@/api/client";
 
 const routes: RouteRecordRaw[] = [
-  { path: "/login", name: "login", component: () => import("./views/Login.vue"), meta: { public: true } },
-  { path: "/setup", name: "setup", component: () => import("./views/Setup.vue"), meta: { public: true } },
+  {
+    path: "/login",
+    name: "login",
+    component: () => import("./views/Login.vue"),
+    meta: { public: true },
+  },
+  {
+    path: "/setup",
+    name: "setup",
+    component: () => import("./views/Setup.vue"),
+    meta: { public: true },
+  },
   { path: "/", name: "dashboard", component: () => import("./views/Dashboard.vue") },
   { path: "/jobs", name: "jobs", component: () => import("./views/Jobs.vue") },
   { path: "/settings", name: "settings", component: () => import("./views/Settings.vue") },

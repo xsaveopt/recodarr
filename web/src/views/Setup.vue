@@ -42,15 +42,33 @@ async function submit() {
       </label>
       <label>
         <span>Password</span>
-        <Password v-model="password" :feedback="false" toggleMask autocomplete="new-password" required inputId="pw1" fluid />
+        <Password
+          v-model="password"
+          :feedback="false"
+          toggleMask
+          autocomplete="new-password"
+          required
+          inputId="pw1"
+          fluid
+        />
       </label>
       <label>
         <span>Confirm password</span>
-        <Password v-model="confirm" :feedback="false" toggleMask autocomplete="new-password" required inputId="pw2" fluid />
+        <Password
+          v-model="confirm"
+          :feedback="false"
+          toggleMask
+          autocomplete="new-password"
+          required
+          inputId="pw2"
+          fluid
+        />
       </label>
       <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
       <Button type="submit" label="Create admin" :loading="submitting" />
-      <p class="muted small">Forgot your password later? Run <code>recodarr reset-admin</code> in the container shell.</p>
+      <p class="muted small">
+        Forgot your password later? Run <code>recodarr reset-admin</code> in the container shell.
+      </p>
     </form>
   </div>
 </template>

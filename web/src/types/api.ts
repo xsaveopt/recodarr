@@ -5,7 +5,7 @@ export interface ArrInstance {
   kind: ArrKind;
   name: string;
   url: string;
-  apiKey?: string;        // write-only; never returned by GET
+  apiKey?: string; // write-only; never returned by GET
   webhookSecret?: string; // write-only; never returned by GET
   enabled: boolean;
   hasApiKey: boolean;
@@ -109,12 +109,12 @@ export interface Job {
 
 export interface WorkerStatus {
   isEncoding: boolean;
-  encodingJobId: number;       // back-compat: lowest in-flight id, 0 if none
-  encodingJobIds: number[];    // all in-flight job ids
-  progress: ProgressEvent[];   // current progress per in-flight job
+  encodingJobId: number; // back-compat: lowest in-flight id, 0 if none
+  encodingJobIds: number[]; // all in-flight job ids
+  progress: ProgressEvent[]; // current progress per in-flight job
   lastTickAt: string | null;
   window: WindowStatus;
-  maxParallelEncodes: number;  // configured concurrency limit
+  maxParallelEncodes: number; // configured concurrency limit
 }
 
 export interface ProgressEvent {

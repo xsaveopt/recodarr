@@ -63,7 +63,9 @@ onMounted(load);
         <span>Interval (seconds)</span>
         <InputNumber v-model="intervalSeconds" :min="5" :max="3600" showButtons />
       </label>
-      <p class="muted small">How often the worker polls qBittorrent and picks up ready jobs. Default: 30.</p>
+      <p class="muted small">
+        How often the worker polls qBittorrent and picks up ready jobs. Default: 30.
+      </p>
 
       <div class="section-title">Concurrency</div>
 
@@ -72,9 +74,9 @@ onMounted(load);
         <InputNumber v-model="maxParallel" :min="1" :max="16" showButtons />
       </label>
       <p class="muted small">
-        How many encodes can run at once. Default 1. Hardware encoders (NVENC / QSV / VAAPI)
-        share one engine on most cards, so &gt;1 there gives no speed-up. Software encoders
-        (x264 / x265) scale with CPU cores; usually 2 is the sweet spot on 8+ cores.
+        How many encodes can run at once. Default 1. Hardware encoders (NVENC / QSV / VAAPI) share
+        one engine on most cards, so &gt;1 there gives no speed-up. Software encoders (x264 / x265)
+        scale with CPU cores; usually 2 is the sweet spot on 8+ cores.
       </p>
 
       <div class="section-title">Encoding window</div>

@@ -25,7 +25,10 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     // Session expired or never existed — bounce to login. Preserve current path so
     // the user can return after logging back in.
     const here = window.location.pathname + window.location.search;
-    if (!window.location.pathname.startsWith("/login") && !window.location.pathname.startsWith("/setup")) {
+    if (
+      !window.location.pathname.startsWith("/login") &&
+      !window.location.pathname.startsWith("/setup")
+    ) {
       window.location.assign(`/login?next=${encodeURIComponent(here)}`);
     }
     throw new Error("unauthorized");
@@ -58,7 +61,8 @@ export const api = {
     update: (a: ArrInstance) => request<ArrInstance>("PUT", `/arr-instances/${a.id}`, a),
     remove: (id: number) => request<void>("DELETE", `/arr-instances/${id}`),
     allTags: () => request<InstanceTag[]>("GET", "/arr-instances/all-tags"),
-    test: (id: number) => request<{ ok: boolean; error?: string }>("POST", `/arr-instances/${id}/test`),
+    test: (id: number) =>
+      request<{ ok: boolean; error?: string }>("POST", `/arr-instances/${id}/test`),
     revealWebhookSecret: (id: number) =>
       request<{ username: string; password: string }>("GET", `/arr-instances/${id}/webhook-secret`),
   },
@@ -73,8 +77,13 @@ export const api = {
       request<QbitInstance>("POST", "/qbit-instances", q),
     remove: (id: number) => request<void>("DELETE", `/qbit-instances/${id}`),
     testCredentials: (url: string, username: string, password: string) =>
-      request<{ ok: boolean; error?: string }>("POST", "/qbit-instances/test", { url, username, password }),
-    test: (id: number) => request<{ ok: boolean; error?: string }>("POST", `/qbit-instances/${id}/test`),
+      request<{ ok: boolean; error?: string }>("POST", "/qbit-instances/test", {
+        url,
+        username,
+        password,
+      }),
+    test: (id: number) =>
+      request<{ ok: boolean; error?: string }>("POST", `/qbit-instances/${id}/test`),
   },
   profiles: {
     list: () => request<Profile[]>("GET", "/profiles"),

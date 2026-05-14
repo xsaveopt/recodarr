@@ -201,7 +201,7 @@ onMounted(load);
         <template #body="{ data }">{{ data.audioEncoder || "copy" }}</template>
       </Column>
       <Column header="Container" style="width: 5rem">
-        <template #body="{ data }">{{ (data.containerFormat || 'mkv').toUpperCase() }}</template>
+        <template #body="{ data }">{{ (data.containerFormat || "mkv").toUpperCase() }}</template>
       </Column>
       <Column header="Options">
         <template #body="{ data }">
@@ -209,7 +209,9 @@ onMounted(load);
           <span v-if="data.twoPass">2-pass </span>
           <span v-if="data.framerate">{{ data.framerate }}fps </span>
           <span v-if="data.extraArgs" title="Has extra args">args </span>
-          <span v-if="!data.subtitleCopy && !data.twoPass && !data.framerate && !data.extraArgs">—</span>
+          <span v-if="!data.subtitleCopy && !data.twoPass && !data.framerate && !data.extraArgs"
+            >—</span
+          >
         </template>
       </Column>
       <Column header="" style="width: 8rem">
@@ -325,8 +327,8 @@ onMounted(load);
           />
         </label>
         <p class="muted small">
-          Empty encoder = copy all tracks (bitrate/mixdown ignored).
-          Selecting an encoder re-encodes all audio tracks.
+          Empty encoder = copy all tracks (bitrate/mixdown ignored). Selecting an encoder re-encodes
+          all audio tracks.
         </p>
 
         <label class="row">
@@ -355,7 +357,10 @@ onMounted(load);
         </label>
         <label>
           <span>Framerate</span>
-          <InputText v-model="editing.framerate" placeholder="e.g. 30, 24000/1001 (empty = source)" />
+          <InputText
+            v-model="editing.framerate"
+            placeholder="e.g. 30, 24000/1001 (empty = source)"
+          />
         </label>
 
         <div class="section-title">Advanced</div>

@@ -148,11 +148,7 @@ onUnmounted(() => {
         <span class="encode-label">Encoding</span>
         <span class="muted small">{{ slotsLabel }}</span>
       </div>
-      <div
-        v-for="ev in activeEncodes"
-        :key="ev.jobId"
-        class="encode-card"
-      >
+      <div v-for="ev in activeEncodes" :key="ev.jobId" class="encode-card">
         <div class="encode-head">
           <span class="encode-title" :title="ev.title">{{ ev.title }}</span>
           <span class="encode-eta" v-if="ev.eta">ETA {{ ev.eta }}</span>
@@ -169,24 +165,28 @@ onUnmounted(() => {
     <div v-if="workerStatus" class="worker-row">
       <span class="worker-label">Worker</span>
       <span :class="workerStatus.isEncoding ? 'worker-encoding' : 'worker-idle'">
-        {{
-          workerStatus.isEncoding
-            ? `${workerStatus.encodingJobIds.length} encoding`
-            : "idle"
-        }}
+        {{ workerStatus.isEncoding ? `${workerStatus.encodingJobIds.length} encoding` : "idle" }}
       </span>
       <span
         v-if="workerStatus.window?.hasLimit"
         :class="workerStatus.window.active ? 'window-active' : 'window-paused'"
       >
-        window {{ workerStatus.window.start }}–{{ workerStatus.window.end }}
-        ({{ workerStatus.window.active ? "active" : "paused" }})
+        window {{ workerStatus.window.start }}–{{ workerStatus.window.end }} ({{
+          workerStatus.window.active ? "active" : "paused"
+        }})
       </span>
       <span class="worker-tick">last tick: {{ relativeTime(workerStatus.lastTickAt) }}</span>
     </div>
 
     <div
-      v-if="stats && stats.done === 0 && stats.encoding === 0 && stats.ready === 0 && stats.waitingForSeed === 0 && stats.failed === 0"
+      v-if="
+        stats &&
+        stats.done === 0 &&
+        stats.encoding === 0 &&
+        stats.ready === 0 &&
+        stats.waitingForSeed === 0 &&
+        stats.failed === 0
+      "
       class="empty-hint"
     >
       <strong>Nothing here yet.</strong>
@@ -213,7 +213,9 @@ onUnmounted(() => {
         <template #body="{ data }">{{ formatBytes(data.originalSize ?? data.fileSize) }}</template>
       </Column>
       <Column header="Final" style="width: 7rem">
-        <template #body="{ data }">{{ data.finalSize != null ? formatBytes(data.finalSize) : '—' }}</template>
+        <template #body="{ data }">{{
+          data.finalSize != null ? formatBytes(data.finalSize) : "—"
+        }}</template>
       </Column>
       <Column header="Saved" style="width: 5rem">
         <template #body="{ data }">{{ savings(data) }}</template>
@@ -254,17 +256,34 @@ onUnmounted(() => {
   text-decoration: none;
   color: inherit;
   display: block;
-  transition: transform 0.06s ease, box-shadow 0.1s ease;
+  transition:
+    transform 0.06s ease,
+    box-shadow 0.1s ease;
 }
 a.stat-card:hover {
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
-.stat-card.saved { border-color: var(--app-stat-saved-border); background: var(--app-stat-saved-bg); }
-.stat-card.done  { border-color: var(--app-stat-done-border); background: var(--app-stat-done-bg); }
-.stat-card.encoding { border-color: var(--app-stat-encoding-border); background: var(--app-warn-bg); }
-.stat-card.queued { border-color: var(--app-stat-queued-border); background: var(--app-row-alt); }
-.stat-card.failed { border-color: var(--app-stat-failed-border); background: var(--app-stat-failed-bg); }
+.stat-card.saved {
+  border-color: var(--app-stat-saved-border);
+  background: var(--app-stat-saved-bg);
+}
+.stat-card.done {
+  border-color: var(--app-stat-done-border);
+  background: var(--app-stat-done-bg);
+}
+.stat-card.encoding {
+  border-color: var(--app-stat-encoding-border);
+  background: var(--app-warn-bg);
+}
+.stat-card.queued {
+  border-color: var(--app-stat-queued-border);
+  background: var(--app-row-alt);
+}
+.stat-card.failed {
+  border-color: var(--app-stat-failed-border);
+  background: var(--app-stat-failed-bg);
+}
 .stat-value {
   font-size: 1.8rem;
   font-weight: 700;
@@ -323,7 +342,9 @@ h3 {
   margin-bottom: 1.5rem;
   font-size: 0.9rem;
 }
-.empty-hint a { color: var(--app-warn-fg); }
+.empty-hint a {
+  color: var(--app-warn-fg);
+}
 .encode-list {
   display: flex;
   flex-direction: column;

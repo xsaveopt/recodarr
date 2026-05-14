@@ -69,12 +69,13 @@ async function add() {
     return;
   }
   const m = await notify.tryRun(
-    () => api.tagMappings.create({
-      arrKind: newKind.value!,
-      tagId: newTag.value!.tagId,
-      tagLabel: newTag.value!.tagLabel,
-      profileId: newProfileId.value!,
-    }),
+    () =>
+      api.tagMappings.create({
+        arrKind: newKind.value!,
+        tagId: newTag.value!.tagId,
+        tagLabel: newTag.value!.tagLabel,
+        profileId: newProfileId.value!,
+      }),
     "Couldn't add mapping",
   );
   if (m) {
@@ -117,8 +118,8 @@ onMounted(() => {
 <template>
   <div class="panel">
     <p class="muted">
-      Tag → profile mappings are evaluated on every incoming webhook. Add a tag from Sonarr,
-      Radarr, or both — items carrying that tag will be queued with the chosen profile.
+      Tag → profile mappings are evaluated on every incoming webhook. Add a tag from Sonarr, Radarr,
+      or both — items carrying that tag will be queued with the chosen profile.
     </p>
 
     <DataTable :value="mappings" stripedRows size="small" class="mapping-table">

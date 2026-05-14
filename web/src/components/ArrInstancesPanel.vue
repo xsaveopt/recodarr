@@ -178,9 +178,8 @@ onMounted(() => {
   <div class="panel">
     <div class="panel-head">
       <p class="muted">
-        Sonarr/Radarr instances. After saving, click <strong>Show</strong> to reveal the
-        webhook URL plus the Basic-auth username/password to paste into *arr's
-        Settings → Connect → Webhook.
+        Sonarr/Radarr instances. After saving, click <strong>Show</strong> to reveal the webhook URL
+        plus the Basic-auth username/password to paste into *arr's Settings → Connect → Webhook.
       </p>
       <Button icon="pi pi-plus" label="Add" @click="startCreate" />
     </div>
@@ -248,10 +247,10 @@ onMounted(() => {
     >
       <div v-if="connectFor" class="connect-body">
         <p class="muted small">
-          In <strong>{{ connectFor.kind }}</strong>: Settings → Connect → + → Webhook.
-          Paste the URL, set Method to <strong>POST</strong>, tick
-          <strong>On File Import</strong> (and <strong>On File Upgrade</strong>),
-          then fill in the Username and Password fields below.
+          In <strong>{{ connectFor.kind }}</strong
+          >: Settings → Connect → + → Webhook. Paste the URL, set Method to <strong>POST</strong>,
+          tick <strong>On File Import</strong> (and <strong>On File Upgrade</strong>), then fill in
+          the Username and Password fields below.
         </p>
 
         <label class="connect-row">
@@ -261,12 +260,12 @@ onMounted(() => {
 
         <label class="connect-row">
           <span>Username</span>
-          <code class="copyable">{{ connectUser || 'recodarr' }}</code>
+          <code class="copyable">{{ connectUser || "recodarr" }}</code>
         </label>
 
         <label class="connect-row">
           <span>Password</span>
-          <code class="copyable">{{ connectLoading ? 'loading…' : connectPass }}</code>
+          <code class="copyable">{{ connectLoading ? "loading…" : connectPass }}</code>
         </label>
       </div>
       <template #footer>
@@ -321,13 +320,17 @@ onMounted(() => {
             v-model="editing.webhookSecret"
             toggleMask
             :feedback="false"
-            :placeholder="editing.hasWebhookSecret ? '(stored — leave blank to keep)' : '(auto-generated if empty)'"
+            :placeholder="
+              editing.hasWebhookSecret
+                ? '(stored — leave blank to keep)'
+                : '(auto-generated if empty)'
+            "
           />
         </label>
         <p class="muted small">
           Used as the HTTP Basic-auth password for incoming webhooks (username is always
-          <code>recodarr</code>). Leave blank to auto-generate. After saving you'll see
-          a panel with everything you need to paste into *arr.
+          <code>recodarr</code>). Leave blank to auto-generate. After saving you'll see a panel with
+          everything you need to paste into *arr.
         </p>
       </div>
       <template #footer>
@@ -394,7 +397,7 @@ onMounted(() => {
   font-size: 0.85rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   word-break: break-all;
-  user-select: all;          /* one click selects the whole value */
+  user-select: all; /* one click selects the whole value */
   cursor: text;
 }
 .test-ok {

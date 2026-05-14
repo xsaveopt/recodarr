@@ -33,7 +33,9 @@ onMounted(load);
           </tr>
           <tr>
             <th>Version</th>
-            <td><code>{{ info.hbVersion }}</code></td>
+            <td>
+              <code>{{ info.hbVersion }}</code>
+            </td>
           </tr>
           <tr>
             <th>Detected encoders</th>
@@ -87,7 +89,9 @@ onMounted(load);
         <table>
           <tr>
             <th>Platform</th>
-            <td><code>{{ info.platform }}/{{ info.arch }}</code></td>
+            <td>
+              <code>{{ info.platform }}/{{ info.arch }}</code>
+            </td>
           </tr>
         </table>
       </section>

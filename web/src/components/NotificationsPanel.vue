@@ -64,8 +64,8 @@ onMounted(load);
 <template>
   <div class="panel">
     <p class="muted">
-      Send a webhook notification when an encode finishes or fails.
-      Compatible with ntfy, Gotify, and any HTTP endpoint accepting JSON.
+      Send a webhook notification when an encode finishes or fails. Compatible with ntfy, Gotify,
+      and any HTTP endpoint accepting JSON.
     </p>
     <div class="form">
       <label>
@@ -84,8 +84,8 @@ onMounted(load);
 
     <p class="muted small">
       Recodarr posts JSON with <code>title</code>, <code>message</code>, <code>status</code>,
-      <code>filePath</code>, and <code>savedBytes</code> fields.
-      For ntfy, point directly at a topic URL (e.g. <code>https://ntfy.sh/my-topic</code>).
+      <code>filePath</code>, and <code>savedBytes</code> fields. For ntfy, point directly at a topic
+      URL (e.g. <code>https://ntfy.sh/my-topic</code>).
     </p>
 
     <div class="actions">

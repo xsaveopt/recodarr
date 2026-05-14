@@ -40,7 +40,15 @@ async function submit() {
       </label>
       <label>
         <span>Password</span>
-        <Password v-model="password" :feedback="false" toggleMask autocomplete="current-password" required inputId="pw" fluid />
+        <Password
+          v-model="password"
+          :feedback="false"
+          toggleMask
+          autocomplete="current-password"
+          required
+          inputId="pw"
+          fluid
+        />
       </label>
       <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
       <Button type="submit" label="Sign in" :loading="submitting" />

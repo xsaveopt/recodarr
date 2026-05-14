@@ -96,7 +96,9 @@ function remove(id: number) {
   notify.confirmDelete({
     name: `job #${id}`,
     onAccept: async () => {
-      const ok = await withBusy(id, () => notify.tryRun(() => api.jobs.remove(id), "Couldn't delete"));
+      const ok = await withBusy(id, () =>
+        notify.tryRun(() => api.jobs.remove(id), "Couldn't delete"),
+      );
       if (ok !== undefined) jobs.value = jobs.value.filter((j) => j.id !== id);
     },
   });
@@ -168,7 +170,13 @@ onUnmounted(() => {
       <h2>Jobs</h2>
       <div class="head-actions">
         <Button text icon="pi pi-replay" label="Retry all failed" @click="retryAll" />
-        <Button text severity="danger" icon="pi pi-trash" label="Clear done/failed" @click="clearAll" />
+        <Button
+          text
+          severity="danger"
+          icon="pi pi-trash"
+          label="Clear done/failed"
+          @click="clearAll"
+        />
         <Button text icon="pi pi-refresh" label="Refresh" @click="load" />
       </div>
     </div>
@@ -223,7 +231,9 @@ onUnmounted(() => {
       </Column>
       <Column header="Updated" style="width: 7rem">
         <template #body="{ data }">
-          <span :title="new Date(data.updatedAt).toLocaleString()">{{ shortTime(data.updatedAt) }}</span>
+          <span :title="new Date(data.updatedAt).toLocaleString()">{{
+            shortTime(data.updatedAt)
+          }}</span>
         </template>
       </Column>
       <Column header="Error" style="min-width: 10rem">
@@ -234,7 +244,9 @@ onUnmounted(() => {
             type="button"
             @click="logJob = data"
             :title="'Click for full log'"
-          >{{ data.error }}</button>
+          >
+            {{ data.error }}
+          </button>
           <span v-else-if="data.refreshError" class="warn-msg" :title="data.refreshError">
             done, but *arr refresh failed
           </span>

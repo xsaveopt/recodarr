@@ -9,7 +9,14 @@ import { useNotify } from "@/composables/useNotify";
 import type { QbitInstance } from "@/types/api";
 
 const notify = useNotify();
-const item = ref<QbitInstance>({ id: 0, name: "qbit", url: "", username: "", password: "", hasPassword: false });
+const item = ref<QbitInstance>({
+  id: 0,
+  name: "qbit",
+  url: "",
+  username: "",
+  password: "",
+  hasPassword: false,
+});
 const validationError = ref<string | null>(null);
 const testResult = ref<{ ok: boolean; error?: string } | null>(null);
 const testing = ref(false);
@@ -71,7 +78,14 @@ function remove() {
     onAccept: async () => {
       const ok = await notify.tryRun(() => api.qbit.remove(item.value.id), "Couldn't delete");
       if (ok !== undefined) {
-        item.value = { id: 0, name: "qbit", url: "", username: "", password: "", hasPassword: false };
+        item.value = {
+          id: 0,
+          name: "qbit",
+          url: "",
+          username: "",
+          password: "",
+          hasPassword: false,
+        };
         notify.success("Deleted qBit credentials");
       }
     },
@@ -103,7 +117,12 @@ onMounted(load);
       </label>
       <label>
         <span>Password</span>
-        <Password v-model="item.password" toggleMask :feedback="false" :placeholder="item.hasPassword ? '(stored — leave blank to keep)' : ''" />
+        <Password
+          v-model="item.password"
+          toggleMask
+          :feedback="false"
+          :placeholder="item.hasPassword ? '(stored — leave blank to keep)' : ''"
+        />
       </label>
     </div>
 
@@ -113,13 +132,7 @@ onMounted(load);
 
     <div class="actions">
       <Button label="Save" icon="pi pi-check" @click="save" />
-      <Button
-        text
-        icon="pi pi-wifi"
-        label="Test"
-        :loading="testing"
-        @click="test"
-      />
+      <Button text icon="pi pi-wifi" label="Test" :loading="testing" @click="test" />
       <Button
         v-if="item.id"
         text

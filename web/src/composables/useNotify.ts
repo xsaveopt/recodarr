@@ -40,7 +40,9 @@ export function useNotify() {
       acceptLabel: "Delete",
       rejectLabel: "Cancel",
       acceptClass: "p-button-danger",
-      accept: async () => { await opts.onAccept(); },
+      accept: async () => {
+        await opts.onAccept();
+      },
     });
   }
 
