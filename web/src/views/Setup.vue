@@ -35,7 +35,9 @@ async function submit() {
 <template>
   <div class="auth-shell">
     <form class="auth-card" @submit.prevent="submit">
+      <div class="brand"><span class="mark">◆</span> Recodarr</div>
       <h1>First-run setup</h1>
+      <p class="muted">Create your admin account to get started.</p>
       <label>
         <span>Username</span>
         <InputText v-model="username" autocomplete="username" autofocus required fluid />
@@ -78,34 +80,59 @@ async function submit() {
   min-height: 100vh;
   display: grid;
   place-items: center;
-  background: #0e1116;
+  background: var(--rc-bg);
+  padding: 1rem;
 }
 .auth-card {
-  width: min(420px, 90vw);
-  background: #161b23;
-  color: #eee;
-  padding: 2rem;
-  border-radius: 12px;
+  width: min(420px, 100%);
+  background: var(--rc-surface);
+  color: var(--rc-fg);
+  padding: 1.75rem;
+  border-radius: var(--rc-r-lg);
+  border: 1px solid var(--rc-border);
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+  gap: 0.85rem;
+  box-shadow: var(--rc-shadow);
+}
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--rc-fg);
+}
+.mark {
+  color: var(--rc-accent);
 }
 .auth-card h1 {
-  margin: 0;
+  margin: 0.25rem 0 0;
+  font-size: 1.4rem;
+  letter-spacing: -0.02em;
 }
-/* Auth card is always dark — pin readable muted color and code bg. */
-.auth-card .muted {
-  color: #9aa3ad;
-  margin: 0;
+.auth-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.825rem;
+  color: var(--rc-fg-2);
 }
-.small {
+.muted {
+  color: var(--rc-muted);
+  margin: 0 0 0.5rem;
   font-size: 0.85rem;
 }
+.small {
+  font-size: 0.78rem;
+  margin-top: 0.25rem;
+}
 .auth-card code {
-  background: #232a36;
-  color: #eaeaea;
+  background: var(--rc-code-bg);
+  color: var(--rc-fg);
   padding: 0.1rem 0.35rem;
-  border-radius: 4px;
+  border-radius: var(--rc-r-sm);
+  font-family: var(--rc-font-mono);
+  font-size: 0.78rem;
 }
 </style>

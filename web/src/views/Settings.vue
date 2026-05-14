@@ -14,8 +14,11 @@ import NotificationsPanel from "@/components/NotificationsPanel.vue";
 </script>
 
 <template>
-  <section>
-    <h2>Settings</h2>
+  <section class="settings">
+    <header class="page-head">
+      <h1 class="page-title">Settings</h1>
+      <p class="page-sub">Configure integrations, profiles, and the encoding worker.</p>
+    </header>
     <Tabs value="arr">
       <TabList>
         <Tab value="arr">Sonarr / Radarr</Tab>
@@ -36,3 +39,26 @@ import NotificationsPanel from "@/components/NotificationsPanel.vue";
     </Tabs>
   </section>
 </template>
+
+<style scoped>
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.page-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.page-title {
+  margin: 0;
+  font-size: 1.4rem;
+  letter-spacing: -0.02em;
+}
+.page-sub {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--rc-muted);
+}
+</style>

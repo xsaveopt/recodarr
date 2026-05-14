@@ -165,9 +165,12 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section>
+  <section class="page">
     <div class="head">
-      <h2>Jobs</h2>
+      <div>
+        <h1 class="page-title">Jobs</h1>
+        <p class="page-sub">All encode jobs across every connected *arr instance.</p>
+      </div>
       <div class="head-actions">
         <Button text icon="pi pi-replay" label="Retry all failed" @click="retryAll" />
         <Button
@@ -311,11 +314,26 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+.page-title {
+  margin: 0;
+  font-size: 1.4rem;
+  letter-spacing: -0.02em;
+}
+.page-sub {
+  margin: 0.15rem 0 0;
+  font-size: 0.85rem;
+  color: var(--rc-muted);
+}
 .head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  margin-bottom: 0.5rem;
+  gap: 1rem;
 }
 .head-actions {
   display: flex;

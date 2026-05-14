@@ -1,11 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { RouterLink } from "vue-router";
-import Button from "primevue/button";
-import Tag from "primevue/tag";
-import DataTable from "primevue/datatable";
-import Column from "primevue/column";
-import ProgressBar from "primevue/progressbar";
 
 import { api } from "@/api/client";
 import { useEncodeProgress } from "@/composables/useEncodeProgress";
@@ -18,10 +13,6 @@ const recentJobs = ref<Job[]>([]);
 const workerStatus = ref<WorkerStatus | null>(null);
 let timer: number | null = null;
 
-// When SSE signals an encode finished, optimistically strip the id from our
-// local worker-status mirror so the row vanishes immediately, and trigger a
-// refresh to reconcile. Without this, the row lingers until the next 10s poll
-// because the snapshot still lists the id with its last-known percent.
 const { progressByJob, prune } = useEncodeProgress({
   onComplete: (jobId) => {
     if (workerStatus.value) {
@@ -38,8 +29,6 @@ const { progressByJob, prune } = useEncodeProgress({
   },
 });
 
-// Sorted list of in-flight encodes for rendering. Prefer SSE map; fall back to
-// the worker-status snapshot if SSE hasn't delivered an event yet (first paint).
 const activeEncodes = computed(() => {
   const ids = workerStatus.value?.encodingJobIds ?? [];
   return ids.map((id) => {
@@ -53,8 +42,12 @@ const activeEncodes = computed(() => {
 const slotsLabel = computed(() => {
   const ws = workerStatus.value;
   if (!ws) return "";
-  return `${ws.encodingJobIds.length} / ${ws.maxParallelEncodes} slot${ws.maxParallelEncodes === 1 ? "" : "s"} in use`;
+  return `${ws.encodingJobIds.length} / ${ws.maxParallelEncodes}`;
 });
+
+const queuedJobs = computed(() =>
+  recentJobs.value.filter((j) => j.status === "ready" || j.status === "waiting_for_seed"),
+);
 
 async function load() {
   const res = await notify.tryRun(
@@ -63,9 +56,8 @@ async function load() {
   );
   if (res) {
     stats.value = res[0];
-    recentJobs.value = res[1].slice(0, 10);
+    recentJobs.value = res[1].slice(0, 12);
     workerStatus.value = res[2];
-    // Authoritative active set — drops any stale entries SSE missed.
     prune(res[2].encodingJobIds);
   }
 }
@@ -91,19 +83,19 @@ function formatBytes(n: number) {
   return `${v.toFixed(2)} ${units[i]}`;
 }
 
-function savings(j: Job) {
-  if (j.originalSize == null || j.finalSize == null) return "—";
-  const pct = Math.round((1 - j.finalSize / j.originalSize) * 100);
-  return `${pct}%`;
+function statusLabel(s: JobStatus): string {
+  return s === "waiting_for_seed" ? "seeding" : s;
 }
 
-const severities: Record<JobStatus, "info" | "warn" | "success" | "danger" | "secondary"> = {
-  waiting_for_seed: "secondary",
-  ready: "info",
-  encoding: "warn",
-  done: "success",
-  failed: "danger",
-};
+const queued = computed(() => (stats.value?.ready ?? 0) + (stats.value?.waitingForSeed ?? 0));
+
+const isEmpty = computed(() => {
+  const s = stats.value;
+  if (!s) return false;
+  return (
+    s.done === 0 && s.encoding === 0 && s.ready === 0 && s.waitingForSeed === 0 && s.failed === 0
+  );
+});
 
 onMounted(() => {
   void load();
@@ -115,289 +107,435 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section>
-    <div class="head">
-      <h2>Dashboard</h2>
-      <Button text icon="pi pi-refresh" label="Refresh" @click="load" />
-    </div>
-    <div v-if="stats" class="stat-grid">
-      <div class="stat-card saved">
-        <div class="stat-value">{{ formatBytes(stats.totalSavedBytes) }}</div>
-        <div class="stat-label">Total saved</div>
-      </div>
-      <RouterLink class="stat-card done" :to="{ name: 'jobs', query: { status: 'done' } }">
-        <div class="stat-value">{{ stats.done }}</div>
-        <div class="stat-label">Done</div>
-      </RouterLink>
-      <RouterLink class="stat-card encoding" :to="{ name: 'jobs', query: { status: 'encoding' } }">
-        <div class="stat-value">{{ stats.encoding }}</div>
-        <div class="stat-label">Encoding</div>
-      </RouterLink>
-      <RouterLink class="stat-card queued" :to="{ name: 'jobs', query: { status: 'ready' } }">
-        <div class="stat-value">{{ stats.ready + stats.waitingForSeed }}</div>
-        <div class="stat-label">Queued</div>
-      </RouterLink>
-      <RouterLink class="stat-card failed" :to="{ name: 'jobs', query: { status: 'failed' } }">
-        <div class="stat-value">{{ stats.failed }}</div>
-        <div class="stat-label">Failed</div>
-      </RouterLink>
-    </div>
-
-    <div v-if="activeEncodes.length" class="encode-list">
-      <div class="encode-list-head">
-        <span class="encode-label">Encoding</span>
-        <span class="muted small">{{ slotsLabel }}</span>
-      </div>
-      <div v-for="ev in activeEncodes" :key="ev.jobId" class="encode-card">
-        <div class="encode-head">
-          <span class="encode-title" :title="ev.title">{{ ev.title }}</span>
-          <span class="encode-eta" v-if="ev.eta">ETA {{ ev.eta }}</span>
-        </div>
-        <ProgressBar :value="Math.round(ev.percent * 10) / 10" />
-        <div class="encode-meta">
-          <span>{{ ev.percent.toFixed(1) }}%</span>
-          <span v-if="ev.fps">{{ ev.fps.toFixed(1) }} fps</span>
-          <span class="muted small">job #{{ ev.jobId }}</span>
-        </div>
-      </div>
-    </div>
-
-    <div v-if="workerStatus" class="worker-row">
-      <span class="worker-label">Worker</span>
-      <span :class="workerStatus.isEncoding ? 'worker-encoding' : 'worker-idle'">
-        {{ workerStatus.isEncoding ? `${workerStatus.encodingJobIds.length} encoding` : "idle" }}
+  <div class="dash">
+    <!-- Status strip: worker + window -->
+    <div v-if="workerStatus" class="status-strip">
+      <span class="dot" :class="workerStatus.isEncoding ? 'dot-active' : 'dot-idle'"></span>
+      <span class="strip-text">
+        <strong>{{ workerStatus.isEncoding ? "Encoding" : "Idle" }}</strong>
+        <span v-if="workerStatus.isEncoding" class="muted">
+          · {{ workerStatus.encodingJobIds.length }} of {{ workerStatus.maxParallelEncodes }} slots
+        </span>
       </span>
       <span
         v-if="workerStatus.window?.hasLimit"
-        :class="workerStatus.window.active ? 'window-active' : 'window-paused'"
+        class="strip-pill"
+        :class="workerStatus.window.active ? 'pill-ok' : 'pill-warn'"
       >
-        window {{ workerStatus.window.start }}–{{ workerStatus.window.end }} ({{
-          workerStatus.window.active ? "active" : "paused"
-        }})
+        Window {{ workerStatus.window.start }}–{{ workerStatus.window.end }} ·
+        {{ workerStatus.window.active ? "active" : "paused" }}
       </span>
-      <span class="worker-tick">last tick: {{ relativeTime(workerStatus.lastTickAt) }}</span>
+      <span class="strip-tick muted tnum"
+        >last tick {{ relativeTime(workerStatus.lastTickAt) }}</span
+      >
     </div>
 
-    <div
-      v-if="
-        stats &&
-        stats.done === 0 &&
-        stats.encoding === 0 &&
-        stats.ready === 0 &&
-        stats.waitingForSeed === 0 &&
-        stats.failed === 0
-      "
-      class="empty-hint"
-    >
-      <strong>Nothing here yet.</strong>
-      Add a Sonarr/Radarr instance and a tag→profile mapping in
-      <RouterLink to="/settings">Settings</RouterLink>, then paste the webhook URL into *arr's
-      Connect → Webhook page.
+    <!-- Active encodes — the hero -->
+    <section v-if="activeEncodes.length" class="block">
+      <div class="block-head">
+        <h2 class="block-title">Active encode<span v-if="activeEncodes.length > 1">s</span></h2>
+        <span class="block-meta tnum">{{ slotsLabel }}</span>
+      </div>
+      <div class="encodes">
+        <article v-for="ev in activeEncodes" :key="ev.jobId" class="encode">
+          <div class="encode-row">
+            <span class="encode-title" :title="ev.title">{{ ev.title }}</span>
+            <span class="encode-pct tnum">{{ ev.percent.toFixed(1) }}%</span>
+          </div>
+          <div class="bar">
+            <div class="bar-fill" :style="{ width: `${Math.min(100, ev.percent)}%` }"></div>
+          </div>
+          <div class="encode-meta muted tnum">
+            <span v-if="ev.fps">{{ ev.fps.toFixed(1) }} fps</span>
+            <span v-if="ev.eta">ETA {{ ev.eta }}</span>
+            <span class="dim">job #{{ ev.jobId }}</span>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- Stats grid: 5 minimal tiles, no color-coding noise -->
+    <section v-if="stats" class="stats">
+      <div class="stat">
+        <div class="stat-label">Total saved</div>
+        <div class="stat-value tnum">{{ formatBytes(stats.totalSavedBytes) }}</div>
+      </div>
+      <RouterLink class="stat" :to="{ name: 'jobs', query: { status: 'done' } }">
+        <div class="stat-label">Done</div>
+        <div class="stat-value tnum">{{ stats.done }}</div>
+      </RouterLink>
+      <RouterLink class="stat" :to="{ name: 'jobs', query: { status: 'encoding' } }">
+        <div class="stat-label">Encoding</div>
+        <div class="stat-value tnum">
+          {{ stats.encoding }}
+          <span v-if="stats.encoding" class="stat-pulse"></span>
+        </div>
+      </RouterLink>
+      <RouterLink class="stat" :to="{ name: 'jobs', query: { status: 'ready' } }">
+        <div class="stat-label">Queued</div>
+        <div class="stat-value tnum">{{ queued }}</div>
+      </RouterLink>
+      <RouterLink class="stat" :to="{ name: 'jobs', query: { status: 'failed' } }">
+        <div class="stat-label">Failed</div>
+        <div class="stat-value tnum" :class="{ 'stat-bad': stats.failed > 0 }">
+          {{ stats.failed }}
+        </div>
+      </RouterLink>
+    </section>
+
+    <!-- Two-column body: queue + recent -->
+    <div class="grid">
+      <section class="block">
+        <div class="block-head">
+          <h2 class="block-title">Queue</h2>
+          <RouterLink :to="{ name: 'jobs' }" class="block-link">All jobs →</RouterLink>
+        </div>
+        <ul v-if="queuedJobs.length" class="list">
+          <li v-for="j in queuedJobs" :key="j.id" class="list-row">
+            <span class="row-marker" :class="`marker-${j.status}`"></span>
+            <span class="row-title" :title="j.title">{{ j.title }}</span>
+            <span class="row-status muted">{{ statusLabel(j.status) }}</span>
+          </li>
+        </ul>
+        <p v-else class="empty">Nothing queued.</p>
+      </section>
+
+      <section class="block">
+        <div class="block-head">
+          <h2 class="block-title">Recent activity</h2>
+        </div>
+        <ul class="list">
+          <li v-for="j in recentJobs" :key="j.id" class="list-row">
+            <span class="row-marker" :class="`marker-${j.status}`"></span>
+            <span class="row-title" :title="j.title">{{ j.title }}</span>
+            <span v-if="j.finalSize != null && j.originalSize != null" class="row-saved tnum muted">
+              −{{ Math.round((1 - j.finalSize / j.originalSize) * 100) }}%
+            </span>
+            <span v-else class="row-saved muted">{{ statusLabel(j.status) }}</span>
+            <span class="row-time tnum muted">{{ relativeTime(j.updatedAt) }}</span>
+          </li>
+        </ul>
+      </section>
     </div>
 
-    <h3>Recent jobs</h3>
-    <DataTable :value="recentJobs" stripedRows size="small">
-      <template #empty><span class="muted">No jobs yet.</span></template>
-      <Column field="title" header="Title" />
-      <Column field="arrKind" header="Source" style="width: 7rem">
-        <template #body="{ data }">
-          <Tag :value="data.arrKind" :severity="data.arrKind === 'sonarr' ? 'info' : 'warn'" />
-        </template>
-      </Column>
-      <Column field="status" header="Status" style="width: 9rem">
-        <template #body="{ data }">
-          <Tag :value="data.status" :severity="severities[data.status as JobStatus]" />
-        </template>
-      </Column>
-      <Column header="Original" style="width: 7rem">
-        <template #body="{ data }">{{ formatBytes(data.originalSize ?? data.fileSize) }}</template>
-      </Column>
-      <Column header="Final" style="width: 7rem">
-        <template #body="{ data }">{{
-          data.finalSize != null ? formatBytes(data.finalSize) : "—"
-        }}</template>
-      </Column>
-      <Column header="Saved" style="width: 5rem">
-        <template #body="{ data }">{{ savings(data) }}</template>
-      </Column>
-    </DataTable>
-  </section>
+    <!-- Empty state -->
+    <div v-if="isEmpty" class="empty-card">
+      <h3>Welcome to Recodarr.</h3>
+      <p class="muted">
+        To get started, add a Sonarr or Radarr instance and a tag → profile mapping in
+        <RouterLink to="/settings">Settings</RouterLink>, then paste the webhook URL into *arr's
+        <em>Connect → Webhook</em> page.
+      </p>
+    </div>
+  </div>
 </template>
 
 <style scoped>
-.head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.error {
-  background: var(--app-error-bg);
-  color: var(--app-error-fg);
-  padding: 0.5rem 0.75rem;
-  border-radius: 4px;
-  margin-bottom: 1rem;
-}
-.muted {
-  color: var(--app-muted);
-}
-.stat-grid {
-  display: flex;
-  gap: 1rem;
-  flex-wrap: wrap;
-  margin-bottom: 2rem;
-}
-.stat-card {
-  flex: 1;
-  min-width: 8rem;
-  padding: 1rem 1.25rem;
-  border-radius: 8px;
-  border: 1px solid var(--app-panel-border);
-  background: var(--app-panel-bg);
-  text-decoration: none;
-  color: inherit;
-  display: block;
-  transition:
-    transform 0.06s ease,
-    box-shadow 0.1s ease;
-}
-a.stat-card:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-}
-.stat-card.saved {
-  border-color: var(--app-stat-saved-border);
-  background: var(--app-stat-saved-bg);
-}
-.stat-card.done {
-  border-color: var(--app-stat-done-border);
-  background: var(--app-stat-done-bg);
-}
-.stat-card.encoding {
-  border-color: var(--app-stat-encoding-border);
-  background: var(--app-warn-bg);
-}
-.stat-card.queued {
-  border-color: var(--app-stat-queued-border);
-  background: var(--app-row-alt);
-}
-.stat-card.failed {
-  border-color: var(--app-stat-failed-border);
-  background: var(--app-stat-failed-bg);
-}
-.stat-value {
-  font-size: 1.8rem;
-  font-weight: 700;
-  line-height: 1;
-  margin-bottom: 0.25rem;
-}
-.stat-label {
-  font-size: 0.8rem;
-  color: var(--app-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-h3 {
-  margin: 0 0 0.75rem;
-  font-size: 1rem;
-}
-.worker-row {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin-bottom: 1.5rem;
-  padding: 0.5rem 0.75rem;
-  background: var(--app-row-alt);
-  border-radius: 6px;
-  font-size: 0.9rem;
-}
-.worker-label {
-  font-weight: 600;
-  color: var(--app-muted);
-}
-.worker-idle {
-  color: var(--app-muted);
-}
-.worker-encoding {
-  color: var(--app-warn-fg);
-  font-weight: 600;
-}
-.worker-tick {
-  color: var(--app-muted);
-  margin-left: auto;
-  font-size: 0.8rem;
-}
-.window-active {
-  color: var(--app-ok-fg);
-  font-weight: 600;
-}
-.window-paused {
-  color: var(--app-warn-fg);
-  font-weight: 600;
-}
-.empty-hint {
-  background: var(--app-warn-bg);
-  border: 1px solid var(--app-warn-fg);
-  border-radius: 8px;
-  padding: 1rem 1.25rem;
-  margin-bottom: 1.5rem;
-  font-size: 0.9rem;
-}
-.empty-hint a {
-  color: var(--app-warn-fg);
-}
-.encode-list {
+.dash {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  margin-bottom: 1.5rem;
+  gap: 1.25rem;
 }
-.encode-list-head {
+.muted {
+  color: var(--rc-muted);
+}
+.dim {
+  color: var(--rc-faint);
+}
+
+/* Status strip */
+.status-strip {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.825rem;
+  padding: 0.35rem 0.65rem;
+  border: 1px solid var(--rc-border);
+  background: var(--rc-surface);
+  border-radius: var(--rc-r-md);
+  color: var(--rc-fg-2);
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.dot-idle {
+  background: var(--rc-faint);
+}
+.dot-active {
+  background: var(--rc-ok);
+  box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.5);
+  animation: pulse 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(74, 222, 128, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(74, 222, 128, 0);
+  }
+}
+.strip-text strong {
+  font-weight: 600;
+}
+.strip-tick {
+  margin-left: auto;
+  font-size: 0.78rem;
+}
+.strip-pill {
+  font-size: 0.72rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--rc-border);
+}
+.pill-ok {
+  color: var(--rc-ok);
+  background: var(--rc-ok-soft);
+  border-color: transparent;
+}
+.pill-warn {
+  color: var(--rc-warn);
+  background: var(--rc-warn-soft);
+  border-color: transparent;
+}
+
+/* Block (card) primitive */
+.block {
+  background: var(--rc-surface);
+  border: 1px solid var(--rc-border);
+  border-radius: var(--rc-r-lg);
+  padding: 0.875rem 1rem 1rem;
+}
+.block-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 0.75rem;
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.65rem;
 }
-.encode-card {
-  border: 1px solid var(--app-warn-fg);
-  background: var(--app-warn-bg);
-  border-radius: 8px;
-  padding: 0.6rem 0.9rem;
+.block-title {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--rc-muted);
+}
+.block-meta {
+  font-size: 0.78rem;
+  color: var(--rc-muted);
+}
+.block-link {
+  font-size: 0.78rem;
+  color: var(--rc-muted);
+}
+.block-link:hover {
+  color: var(--rc-fg);
+  text-decoration: none;
+}
+
+/* Active encodes */
+.encodes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+.encode {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
 }
-.encode-head {
+.encode-row {
   display: flex;
   align-items: baseline;
-  gap: 0.75rem;
-  font-size: 0.9rem;
-}
-.encode-label {
-  font-weight: 700;
-  color: var(--app-warn-fg);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  font-size: 0.75rem;
-}
-.small {
-  font-size: 0.78rem;
+  justify-content: space-between;
+  gap: 1rem;
 }
 .encode-title {
-  font-weight: 600;
-  flex: 1;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--rc-fg);
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
-.encode-eta {
-  color: var(--app-muted);
-  font-size: 0.85rem;
+.encode-pct {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--rc-fg);
+}
+.bar {
+  height: 4px;
+  background: var(--rc-surface-2);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--rc-accent) 0%, var(--rc-accent) 100%);
+  transition: width 0.4s ease;
 }
 .encode-meta {
   display: flex;
-  justify-content: space-between;
-  font-size: 0.8rem;
-  color: var(--app-muted);
+  gap: 0.85rem;
+  font-size: 0.78rem;
+}
+
+/* Stats */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.5rem;
+}
+.stat {
+  background: var(--rc-surface);
+  border: 1px solid var(--rc-border);
+  border-radius: var(--rc-r-md);
+  padding: 0.7rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  text-decoration: none;
+  color: inherit;
+  transition:
+    border-color 0.08s ease,
+    background 0.08s ease;
+}
+a.stat:hover {
+  border-color: var(--rc-border-strong);
+  background: var(--rc-surface-2);
+  text-decoration: none;
+}
+.stat-label {
+  font-size: 0.72rem;
+  color: var(--rc-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.stat-value {
+  font-size: 1.4rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--rc-fg);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.stat-bad {
+  color: var(--rc-danger);
+}
+.stat-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--rc-warn);
+  animation: pulse-soft 1.4s ease infinite;
+}
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Two-column grid */
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.85rem;
+}
+@media (max-width: 880px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* List rows */
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.list-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0;
+  font-size: 0.825rem;
+  border-bottom: 1px solid var(--rc-border);
+}
+.list-row:last-child {
+  border-bottom: none;
+}
+.row-marker {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--rc-faint);
+  flex-shrink: 0;
+}
+.marker-ready {
+  background: var(--rc-info);
+}
+.marker-waiting_for_seed {
+  background: var(--rc-faint);
+}
+.marker-encoding {
+  background: var(--rc-warn);
+}
+.marker-done {
+  background: var(--rc-ok);
+}
+.marker-failed {
+  background: var(--rc-danger);
+}
+.row-title {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--rc-fg);
+}
+.row-status,
+.row-saved {
+  font-size: 0.78rem;
+}
+.row-time {
+  font-size: 0.78rem;
+  min-width: 4.5rem;
+  text-align: right;
+}
+.empty {
+  margin: 0;
+  padding: 0.5rem 0;
+  font-size: 0.85rem;
+  color: var(--rc-muted);
+}
+
+/* First-run welcome */
+.empty-card {
+  background: var(--rc-surface);
+  border: 1px solid var(--rc-border);
+  border-radius: var(--rc-r-lg);
+  padding: 1.25rem 1.5rem;
+}
+.empty-card h3 {
+  margin: 0 0 0.4rem;
+  font-size: 1rem;
+}
+.empty-card p {
+  margin: 0;
+  font-size: 0.875rem;
 }
 </style>

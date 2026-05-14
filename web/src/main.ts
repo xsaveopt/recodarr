@@ -18,8 +18,9 @@ app.use(PrimeVue, {
   theme: {
     preset: Aura,
     options: {
-      // Auto-follow the OS theme via prefers-color-scheme.
-      darkModeSelector: "system",
+      // Mirror the class set by useTheme() on <html>. PrimeVue components
+      // re-themed via Aura follow this selector for dark mode.
+      darkModeSelector: ".dark",
     },
   },
 });

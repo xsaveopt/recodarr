@@ -19,7 +19,10 @@ onMounted(load);
 
 <template>
   <div class="page">
-    <h2 class="page-title">Debug</h2>
+    <header class="head">
+      <h1 class="page-title">Debug</h1>
+      <p class="page-sub">Runtime info — useful when something isn't behaving.</p>
+    </header>
     <div v-if="loading" class="muted">Loading…</div>
     <div v-else-if="info" class="sections">
       <section>
@@ -106,10 +109,21 @@ onMounted(load);
   gap: 1.5rem;
   max-width: 48rem;
 }
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
 .page-title {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: 1.4rem;
   font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.page-sub {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--rc-muted);
 }
 .sections {
   display: flex;

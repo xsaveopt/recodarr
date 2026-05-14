@@ -1,95 +1,132 @@
 /*
- * Design tokens for Recodarr's hand-rolled UI bits (sidebar, dashboard tiles,
- * panels, dialogs). PrimeVue components style themselves via the Aura preset
- * and follow the OS theme automatically (see main.ts: darkModeSelector "system").
+ * Recodarr design system — Linear/Vercel-inspired.
  *
- * Token naming is the public API used across .vue files; keep these names
- * stable and add new tokens here rather than hardcoding colors in components.
+ * Two themes (`.light` / `.dark` on <html>), driven by useTheme().
+ * PrimeVue's Aura preset follows the same selector (see main.ts).
+ *
+ * Naming: `--rc-*` is the public token API. Hand-rolled UI uses these tokens;
+ * never hardcode a color in a component.
  */
 
-:root {
-  font-family:
-    system-ui,
-    -apple-system,
-    "Segoe UI",
-    Roboto,
-    sans-serif;
-  color-scheme: light dark;
+:root,
+:root.light {
+  color-scheme: light;
 
-  /* Surfaces */
-  --app-bg: #f6f7f9;
-  --app-panel-bg: #ffffff;
-  --app-row-alt: #f1f3f5;
-  --app-panel-border: #e5e7eb;
+  /* Surfaces — pure neutrals, hairline borders */
+  --rc-bg: #fafafa;
+  --rc-surface: #ffffff;
+  --rc-surface-2: #f4f4f5;
+  --rc-surface-3: #ebebed;
+  --rc-border: rgba(0, 0, 0, 0.08);
+  --rc-border-strong: rgba(0, 0, 0, 0.14);
+  --rc-overlay: rgba(255, 255, 255, 0.7);
 
   /* Text */
-  --app-fg: #111827;
-  --app-muted: #6b7280;
-  --app-link: #b45309;
+  --rc-fg: #0a0a0a;
+  --rc-fg-2: #404044;
+  --rc-muted: #71717a;
+  --rc-faint: #a1a1aa;
 
-  /* Code / pre / log */
-  --app-code-bg: #eef0f3;
-  --app-log-bg: #1e1e1e;
-  --app-log-fg: #e5e7eb;
+  /* Single accent — indigo, used sparingly */
+  --rc-accent: #5b5bf3;
+  --rc-accent-fg: #ffffff;
+  --rc-accent-soft: rgba(91, 91, 243, 0.1);
+  --rc-accent-border: rgba(91, 91, 243, 0.3);
 
-  /* Semantic states */
-  --app-error-bg: #fdecea;
-  --app-error-fg: #b91c1c;
-  --app-ok-bg: #e7f5ec;
-  --app-ok-fg: #1a7f37;
-  --app-warn-bg: #fff8e1;
-  --app-warn-fg: #92400e;
-  --app-info-bg: #eaf2ff;
-  --app-info-fg: #1e40af;
+  /* Status — flat, low-saturation */
+  --rc-ok: #16a34a;
+  --rc-ok-soft: rgba(22, 163, 74, 0.1);
+  --rc-warn: #d97706;
+  --rc-warn-soft: rgba(217, 119, 6, 0.1);
+  --rc-danger: #dc2626;
+  --rc-danger-soft: rgba(220, 38, 38, 0.1);
+  --rc-info: #2563eb;
+  --rc-info-soft: rgba(37, 99, 235, 0.1);
 
-  /* Dashboard stat tiles */
-  --app-stat-saved-bg: #eaf3fb;
-  --app-stat-saved-border: #a0c4ff;
-  --app-stat-done-bg: #ecfaef;
-  --app-stat-done-border: #b5e7a0;
-  --app-stat-encoding-bg: #fffbe6;
-  --app-stat-encoding-border: #ffe082;
-  --app-stat-queued-bg: #f1f3f5;
-  --app-stat-queued-border: #cfd8dc;
-  --app-stat-failed-bg: #fdecea;
-  --app-stat-failed-border: #ffb3b3;
+  /* Code / log */
+  --rc-code-bg: rgba(0, 0, 0, 0.04);
+  --rc-log-bg: #18181b;
+  --rc-log-fg: #e4e4e7;
+
+  /* Shadow — used only on overlays/dialogs */
+  --rc-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(0, 0, 0, 0.08);
+
+  /* Type */
+  --rc-font: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --rc-font-mono: ui-monospace, "JetBrains Mono", SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Radius — small and consistent */
+  --rc-r-sm: 4px;
+  --rc-r-md: 6px;
+  --rc-r-lg: 10px;
+
+  /* Legacy --app-* aliases kept so existing components don't have to change in
+     one big sweep. Remove once all components migrate to --rc-*. */
+  --app-bg: var(--rc-bg);
+  --app-panel-bg: var(--rc-surface);
+  --app-row-alt: var(--rc-surface-2);
+  --app-panel-border: var(--rc-border);
+  --app-fg: var(--rc-fg);
+  --app-muted: var(--rc-muted);
+  --app-link: var(--rc-accent);
+  --app-code-bg: var(--rc-code-bg);
+  --app-log-bg: var(--rc-log-bg);
+  --app-log-fg: var(--rc-log-fg);
+  --app-error-bg: var(--rc-danger-soft);
+  --app-error-fg: var(--rc-danger);
+  --app-ok-bg: var(--rc-ok-soft);
+  --app-ok-fg: var(--rc-ok);
+  --app-warn-bg: var(--rc-warn-soft);
+  --app-warn-fg: var(--rc-warn);
+  --app-info-bg: var(--rc-info-soft);
+  --app-info-fg: var(--rc-info);
+  --app-stat-saved-bg: var(--rc-surface);
+  --app-stat-saved-border: var(--rc-border);
+  --app-stat-done-bg: var(--rc-surface);
+  --app-stat-done-border: var(--rc-border);
+  --app-stat-encoding-bg: var(--rc-surface);
+  --app-stat-encoding-border: var(--rc-border);
+  --app-stat-queued-bg: var(--rc-surface);
+  --app-stat-queued-border: var(--rc-border);
+  --app-stat-failed-bg: var(--rc-surface);
+  --app-stat-failed-border: var(--rc-border);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --app-bg: #0d1117;
-    --app-panel-bg: #161b22;
-    --app-row-alt: #1a2029;
-    --app-panel-border: #2a313c;
+:root.dark {
+  color-scheme: dark;
 
-    --app-fg: #e5e7eb;
-    --app-muted: #9ca3af;
-    --app-link: #fcd34d;
+  --rc-bg: #09090b;
+  --rc-surface: #111113;
+  --rc-surface-2: #18181b;
+  --rc-surface-3: #1f1f23;
+  --rc-border: rgba(255, 255, 255, 0.08);
+  --rc-border-strong: rgba(255, 255, 255, 0.14);
+  --rc-overlay: rgba(10, 10, 12, 0.7);
 
-    --app-code-bg: #232a36;
-    --app-log-bg: #0a0d12;
-    --app-log-fg: #d4d4d4;
+  --rc-fg: #fafafa;
+  --rc-fg-2: #d4d4d8;
+  --rc-muted: #a1a1aa;
+  --rc-faint: #52525b;
 
-    --app-error-bg: #3a1212;
-    --app-error-fg: #fca5a5;
-    --app-ok-bg: #0f2a18;
-    --app-ok-fg: #86efac;
-    --app-warn-bg: #2b2410;
-    --app-warn-fg: #fcd34d;
-    --app-info-bg: #11203a;
-    --app-info-fg: #93c5fd;
+  --rc-accent: #818cf8;
+  --rc-accent-fg: #0a0a0a;
+  --rc-accent-soft: rgba(129, 140, 248, 0.14);
+  --rc-accent-border: rgba(129, 140, 248, 0.32);
 
-    --app-stat-saved-bg: #11243a;
-    --app-stat-saved-border: #1e3a5f;
-    --app-stat-done-bg: #0f2a18;
-    --app-stat-done-border: #1f5132;
-    --app-stat-encoding-bg: #2b2410;
-    --app-stat-encoding-border: #6b5318;
-    --app-stat-queued-bg: #1a2029;
-    --app-stat-queued-border: #2c3340;
-    --app-stat-failed-bg: #3a1212;
-    --app-stat-failed-border: #6b1d1d;
-  }
+  --rc-ok: #4ade80;
+  --rc-ok-soft: rgba(74, 222, 128, 0.12);
+  --rc-warn: #fbbf24;
+  --rc-warn-soft: rgba(251, 191, 36, 0.12);
+  --rc-danger: #f87171;
+  --rc-danger-soft: rgba(248, 113, 113, 0.12);
+  --rc-info: #60a5fa;
+  --rc-info-soft: rgba(96, 165, 250, 0.12);
+
+  --rc-code-bg: rgba(255, 255, 255, 0.06);
+  --rc-log-bg: #050507;
+  --rc-log-fg: #d4d4d8;
+
+  --rc-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
 * {
@@ -101,10 +138,118 @@ body,
   height: 100%;
   margin: 0;
 }
+html {
+  font-family: var(--rc-font);
+  font-size: 14px;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
 body {
-  background: var(--app-bg);
-  color: var(--app-fg);
+  background: var(--rc-bg);
+  color: var(--rc-fg);
+  font-size: 0.875rem;
+  line-height: 1.5;
 }
 a {
-  color: var(--app-link);
+  color: var(--rc-accent);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+h1,
+h2,
+h3,
+h4 {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--rc-fg);
+}
+
+/* Tabular numbers everywhere — counters, sizes, progress all stay aligned */
+.tnum,
+code,
+pre {
+  font-variant-numeric: tabular-nums;
+}
+code,
+pre {
+  font-family: var(--rc-font-mono);
+}
+
+/* Subtle scrollbar tweaks for dark mode */
+:root.dark ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+:root.dark ::-webkit-scrollbar-thumb {
+  background: var(--rc-surface-3);
+  border-radius: 8px;
+}
+:root.dark ::-webkit-scrollbar-thumb:hover {
+  background: var(--rc-border-strong);
+}
+:root.dark ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* PrimeVue overrides — shave the visual weight of the Aura preset to match
+   our hairline aesthetic. Targets are intentionally narrow. */
+.p-button {
+  font-weight: 500;
+  letter-spacing: -0.005em;
+}
+.p-datatable .p-datatable-thead > tr > th {
+  background: transparent !important;
+  border-bottom: 1px solid var(--rc-border) !important;
+  font-size: 0.75rem !important;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--rc-muted) !important;
+  font-weight: 500 !important;
+  padding: 0.5rem 0.75rem !important;
+}
+.p-datatable .p-datatable-tbody > tr > td {
+  border-bottom: 1px solid var(--rc-border) !important;
+  padding: 0.55rem 0.75rem !important;
+  font-size: 0.825rem;
+}
+.p-datatable .p-datatable-tbody > tr {
+  background: transparent !important;
+  transition: background 0.06s ease;
+}
+.p-datatable .p-datatable-tbody > tr:hover {
+  background: var(--rc-surface-2) !important;
+}
+.p-tag {
+  font-weight: 500 !important;
+  font-size: 0.7rem !important;
+  letter-spacing: 0.02em;
+  padding: 0.15rem 0.5rem !important;
+  border-radius: var(--rc-r-sm) !important;
+}
+.p-progressbar {
+  height: 4px !important;
+  background: var(--rc-surface-2) !important;
+  border-radius: 999px !important;
+  overflow: hidden;
+}
+.p-progressbar .p-progressbar-value {
+  background: var(--rc-accent) !important;
+  transition: width 0.2s ease;
+}
+.p-dialog {
+  border-radius: var(--rc-r-lg) !important;
+  border: 1px solid var(--rc-border) !important;
+  box-shadow: var(--rc-shadow) !important;
+}
+.p-tablist-tab-list {
+  border-bottom: 1px solid var(--rc-border) !important;
+}
+.p-tab {
+  font-size: 0.825rem !important;
+  font-weight: 500 !important;
+  padding: 0.6rem 0.9rem !important;
 }
