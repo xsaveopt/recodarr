@@ -133,7 +133,7 @@ th,
 td {
   padding: 0.45rem 0.6rem;
   text-align: left;
-  border-bottom: 1px solid var(--p-surface-200, #e5e5e5);
+  border-bottom: 1px solid var(--app-panel-border);
   font-size: 0.9rem;
 }
 th {
@@ -167,10 +167,13 @@ th {
 }
 .enc-tag {
   display: inline-block;
-  background: var(--p-surface-100, #f3f3f3);
+  background: var(--app-row-alt);
+  color: var(--app-fg);
+  border: 1px solid var(--app-panel-border);
   border-radius: 3px;
   padding: 0.1rem 0.4rem;
   margin: 0.1rem 0.2rem 0.1rem 0;
   font-size: 0.8rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 </style>
