@@ -43,7 +43,7 @@ ARG NVCODEC_HEADERS_VERSION
 ENV DEBIAN_FRONTEND=noninteractive
 RUN echo "deb http://deb.debian.org/debian trixie main contrib non-free non-free-firmware" > /etc/apt/sources.list \
     && apt-get update && apt-get install -y --no-install-recommends \
-        autoconf automake build-essential ca-certificates cmake git \
+        autoconf automake build-essential ca-certificates clang cmake git \
         libass-dev libbz2-dev libfontconfig1-dev libfreetype6-dev libfribidi-dev \
         libharfbuzz-dev libjansson-dev liblzma-dev libmp3lame-dev libnuma-dev \
         libogg-dev libopus-dev libsamplerate-dev libspeex-dev libtheora-dev \
