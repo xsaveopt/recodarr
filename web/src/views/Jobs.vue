@@ -301,17 +301,17 @@ onUnmounted(() => {
   width: 14rem;
 }
 .error {
-  background: #fee;
-  color: #900;
+  background: var(--app-error-bg);
+  color: var(--app-error-fg);
   padding: 0.5rem 0.75rem;
   border-radius: 4px;
   margin-bottom: 0.75rem;
 }
 .muted {
-  color: #888;
+  color: var(--app-muted);
 }
 .err-msg {
-  color: #c00;
+  color: var(--app-error-fg);
   max-width: 18rem;
   display: inline-block;
   overflow: hidden;
@@ -328,7 +328,7 @@ onUnmounted(() => {
   text-decoration: underline dotted;
 }
 .warn-msg {
-  color: #b45309;
+  color: var(--app-warn-fg);
   font-size: 0.85rem;
   cursor: help;
 }
@@ -341,17 +341,17 @@ onUnmounted(() => {
   display: flex;
   gap: 1.5rem;
   font-size: 0.9rem;
-  color: #666;
+  color: var(--app-muted);
 }
 .log-error {
-  background: #fee;
-  color: #900;
+  background: var(--app-error-bg);
+  color: var(--app-error-fg);
   padding: 0.5rem 0.75rem;
   border-radius: 4px;
 }
 .log-pre {
-  background: #1e1e1e;
-  color: #ddd;
+  background: var(--app-log-bg);
+  color: var(--app-log-fg);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.8rem;
   padding: 0.75rem;

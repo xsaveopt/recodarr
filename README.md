@@ -40,6 +40,26 @@ services:
 docker compose up -d
 ```
 
+### NVIDIA NVENC
+
+Install `nvidia-container-toolkit` on the host (see NVIDIA's docs for your distro) and run `sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker`. Then add to the service:
+
+```yaml
+    environment:
+      TZ: Europe/Amsterdam
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+```
+
+Pick the `nvenc_*` encoders in your HandBrake profile. Verify on Settings, Debug that NVENC is detected.
+
 ## Wiring it up
 
 1. **HandBrake profile**: Settings, HandBrake Profiles. Pick an encoder and quality. The profile controls how files get re-encoded.
@@ -49,8 +69,8 @@ docker compose up -d
 3. **Sonarr / Radarr**: Settings, Sonarr / Radarr. Add an instance. After saving you'll see a webhook URL like `http://recodarr:8080/webhook/sonarr/1` and a generated webhook secret. In *arr, go to Settings, Connect, add a Webhook with:
    - URL: the one shown in Recodarr
    - Method: POST
-   - Triggers: On File Import (and On Import if available)
-   - Headers: add `X-Webhook-Token` with the secret as its value
+   - Triggers: tick **On File Import** (and **On File Upgrade** if you also want re-encodes after a quality upgrade)
+   - Toggle **Show Advanced** at the top of the form to reveal the **Headers** field, then add a row with name `X-Webhook-Token` and value `<the secret>`
 
    The secret is required. Webhooks without it are rejected.
 

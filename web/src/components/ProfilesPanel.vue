@@ -387,7 +387,7 @@ onMounted(load);
   gap: 1rem;
 }
 .muted {
-  color: #888;
+  color: var(--app-muted);
   margin: 0;
   max-width: 50rem;
 }
@@ -395,8 +395,8 @@ onMounted(load);
   font-size: 0.85rem;
 }
 .error {
-  background: #fee;
-  color: #900;
+  background: var(--app-error-bg);
+  color: var(--app-error-fg);
   padding: 0.5rem 0.75rem;
   border-radius: 4px;
 }
@@ -419,7 +419,7 @@ onMounted(load);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #888;
+  color: var(--app-muted);
   margin-top: 0.25rem;
 }
 :deep(.mono input) {

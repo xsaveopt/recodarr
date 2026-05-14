@@ -189,13 +189,13 @@ onMounted(() => {
   padding-top: 0.5rem;
 }
 .muted {
-  color: #888;
+  color: var(--app-muted);
   margin: 0;
   font-size: 0.9rem;
 }
 .error {
-  background: #fee;
-  color: #900;
+  background: var(--app-error-bg);
+  color: var(--app-error-fg);
   padding: 0.5rem 0.75rem;
   border-radius: 4px;
   font-size: 0.9rem;

@@ -103,27 +103,27 @@ onMounted(load);
   max-width: 38rem;
 }
 .muted {
-  color: #888;
+  color: var(--app-muted);
   margin: 0;
 }
 .small {
   font-size: 0.85rem;
 }
 .error {
-  background: #fee;
-  color: #900;
+  background: var(--app-error-bg);
+  color: var(--app-error-fg);
   padding: 0.5rem 0.75rem;
   border-radius: 4px;
 }
 .ok {
-  background: #efe;
-  color: #060;
+  background: var(--app-ok-bg);
+  color: var(--app-ok-fg);
   padding: 0.5rem 0.75rem;
   border-radius: 4px;
 }
 .info {
-  background: #eef;
-  color: #336;
+  background: var(--app-info-bg);
+  color: var(--app-info-fg);
   padding: 0.5rem 0.75rem;
   border-radius: 4px;
 }

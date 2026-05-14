@@ -69,8 +69,9 @@ async function logout() {
   min-height: 100vh;
 }
 .sidebar {
-  background: #14181f;
-  color: #e6e6e6;
+  background: var(--p-surface-100, #f1f3f5);
+  color: var(--app-fg);
+  border-right: 1px solid var(--app-panel-border);
   padding: 1.25rem 1rem;
   display: flex;
   flex-direction: column;
@@ -87,14 +88,17 @@ nav {
   gap: 0.25rem;
 }
 nav a {
-  color: #c8c8c8;
+  color: var(--app-fg);
   text-decoration: none;
   padding: 0.5rem 0.75rem;
   border-radius: 6px;
 }
+nav a:hover {
+  background: var(--app-row-alt);
+}
 nav a.router-link-active {
-  background: #232a36;
-  color: #fff;
+  background: var(--p-primary-color, #3b82f6);
+  color: var(--p-primary-contrast-color, #fff);
 }
 .content {
   padding: 1.5rem 2rem;
@@ -107,7 +111,7 @@ nav a.router-link-active {
   font-size: 0.85rem;
 }
 .who {
-  color: #aaa;
+  color: var(--app-muted);
   padding: 0 0.75rem;
 }
 </style>

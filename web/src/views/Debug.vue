@@ -123,7 +123,7 @@ h3 {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #888;
+  color: var(--app-muted);
 }
 table {
   border-collapse: collapse;
@@ -138,30 +138,30 @@ td {
 }
 th {
   width: 14rem;
-  color: #555;
+  color: var(--app-muted);
   font-weight: 500;
 }
 .ok {
-  color: #1a7f37;
+  color: var(--app-ok-fg);
   font-weight: 500;
 }
 .bad {
-  color: #c00;
+  color: var(--app-error-fg);
   font-weight: 500;
 }
 .na {
-  color: #999;
+  color: var(--app-muted);
 }
 .muted {
-  color: #888;
+  color: var(--app-muted);
 }
 .small {
   font-size: 0.82rem;
   margin: 0.25rem 0 0;
 }
 .error {
-  background: #fee;
-  color: #900;
+  background: var(--app-error-bg);
+  color: var(--app-error-fg);
   padding: 0.5rem 0.75rem;
   border-radius: 4px;
 }

@@ -75,7 +75,7 @@ async function submit() {
   gap: 0.25rem;
 }
 .muted {
-  color: #888;
+  color: var(--app-muted);
   margin: 0;
 }
 </style>

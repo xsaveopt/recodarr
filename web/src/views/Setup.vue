@@ -77,7 +77,7 @@ async function submit() {
   margin: 0;
 }
 .muted {
-  color: #888;
+  color: var(--app-muted);
   margin: 0;
 }
 .small {
