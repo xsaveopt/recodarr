@@ -109,9 +109,20 @@ export interface Job {
 
 export interface WorkerStatus {
   isEncoding: boolean;
-  encodingJobId: number;
+  encodingJobId: number;       // back-compat: lowest in-flight id, 0 if none
+  encodingJobIds: number[];    // all in-flight job ids
+  progress: ProgressEvent[];   // current progress per in-flight job
   lastTickAt: string | null;
   window: WindowStatus;
+  maxParallelEncodes: number;  // configured concurrency limit
+}
+
+export interface ProgressEvent {
+  jobId: number;
+  title: string;
+  percent: number;
+  fps: number;
+  eta: string;
 }
 
 export interface WindowStatus {
@@ -132,6 +143,7 @@ export interface JobStats {
 
 export interface AppSettings {
   worker_interval_seconds?: string;
+  max_parallel_encodes?: string;
   encoding_window_start?: string;
   encoding_window_end?: string;
   notify_url?: string;

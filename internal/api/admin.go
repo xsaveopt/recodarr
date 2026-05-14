@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -23,9 +24,11 @@ import (
 type workerClient interface {
 	CancelEncoding(jobID int64) bool
 	EncodingJobID() int64
+	EncodingJobIDs() []int64
 	LastTickAt() time.Time
 	Subscribe() (<-chan job.ProgressEvent, func())
 	CurrentProgress() job.ProgressEvent
+	AllProgress() []job.ProgressEvent
 	WindowStatus(ctx context.Context) job.WindowStatus
 }
 
@@ -193,7 +196,7 @@ func registerAdminRoutes(r chi.Router, st *store.Store, w workerClient) {
 		r.Delete("/{id}", deleteProfile(st))
 	})
 
-	r.Get("/worker/status", workerStatus(w))
+	r.Get("/worker/status", workerStatus(w, st))
 
 	r.Get("/jobs", listJobs(st))
 	r.Post("/jobs/retry-failed", retryAllFailed(st))
@@ -226,6 +229,15 @@ func putSettings(st *store.Store) http.HandlerFunc {
 		for _, k := range []string{"encoding_window_start", "encoding_window_end"} {
 			if v, ok := m[k]; ok && v != "" && !isValidHHMM(v) {
 				http.Error(w, k+": expected HH:MM", http.StatusBadRequest)
+				return
+			}
+		}
+		if v, ok := m["max_parallel_encodes"]; ok {
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 1 || n > store.MaxParallelEncodesCap {
+				http.Error(w,
+					fmt.Sprintf("max_parallel_encodes: expected integer 1..%d", store.MaxParallelEncodesCap),
+					http.StatusBadRequest)
 				return
 			}
 		}
@@ -720,20 +732,28 @@ func buildDebugInfo() debugInfo {
 
 // --- worker ---
 
-func workerStatus(wk workerClient) http.HandlerFunc {
+func workerStatus(wk workerClient, st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		encodingID := wk.EncodingJobID()
+		ids := wk.EncodingJobIDs()
 		t := wk.LastTickAt()
 		var lastTick *string
 		if !t.IsZero() {
 			s := t.UTC().Format(time.RFC3339)
 			lastTick = &s
 		}
+		var first int64
+		if len(ids) > 0 {
+			first = ids[0]
+		}
+		cfg, _ := st.LoadAppSettings(r.Context())
 		writeJSON(w, http.StatusOK, map[string]any{
-			"isEncoding":    encodingID != 0,
-			"encodingJobId": encodingID,
-			"lastTickAt":    lastTick,
-			"window":        wk.WindowStatus(r.Context()),
+			"isEncoding":         len(ids) > 0,
+			"encodingJobId":      first, // back-compat: first in-flight job
+			"encodingJobIds":     ids,
+			"progress":           wk.AllProgress(),
+			"lastTickAt":         lastTick,
+			"window":             wk.WindowStatus(r.Context()),
+			"maxParallelEncodes": cfg.MaxParallelEncodes,
 		})
 	}
 }

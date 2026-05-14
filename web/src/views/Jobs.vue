@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import DataTable from "primevue/datatable";
 import Column from "primevue/column";
 import Tag from "primevue/tag";
@@ -7,16 +8,26 @@ import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import Select from "primevue/select";
 import Dialog from "primevue/dialog";
+import ProgressBar from "primevue/progressbar";
 
 import { api } from "@/api/client";
+import { useEncodeProgress } from "@/composables/useEncodeProgress";
 import { useNotify } from "@/composables/useNotify";
 import type { Job, JobStatus } from "@/types/api";
 
 const notify = useNotify();
+const { progressByJob } = useEncodeProgress();
+const route = useRoute();
+const router = useRouter();
 const jobs = ref<Job[]>([]);
 const busy = ref<Set<number>>(new Set());
 const titleFilter = ref("");
-const statusFilter = ref<string>("");
+// Status filter is URL-bound (?status=failed) so the dashboard tiles can deep-link
+// into a pre-filtered view, and so it survives page reloads.
+const statusFilter = ref<string>((route.query.status as string) ?? "");
+watch(statusFilter, (v) => {
+  router.replace({ query: { ...route.query, status: v || undefined } });
+});
 const logJob = ref<Job | null>(null);
 let timer: number | null = null;
 
@@ -134,7 +145,12 @@ function savings(j: Job) {
 
 function shortTime(s?: string) {
   if (!s) return "—";
-  return new Date(s).toLocaleString();
+  const diff = Math.floor((Date.now() - new Date(s).getTime()) / 1000);
+  if (diff < 5) return "just now";
+  if (diff < 60) return `${diff}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
 }
 
 onMounted(() => {
@@ -176,9 +192,24 @@ onUnmounted(() => {
           <Tag :value="data.arrKind" :severity="data.arrKind === 'sonarr' ? 'info' : 'warn'" />
         </template>
       </Column>
-      <Column field="status" header="Status" style="width: 9rem">
+      <Column field="status" header="Status" style="width: 12rem">
         <template #body="{ data }">
           <Tag :value="data.status" :severity="severities[data.status as JobStatus]" />
+          <div
+            v-if="data.status === 'encoding' && progressByJob[data.id]"
+            class="row-progress"
+            :title="`${progressByJob[data.id].percent.toFixed(1)}% — ETA ${progressByJob[data.id].eta || '?'}`"
+          >
+            <ProgressBar
+              :value="Math.round(progressByJob[data.id].percent * 10) / 10"
+              :showValue="false"
+              style="height: 4px"
+            />
+            <span class="row-progress-meta">
+              {{ progressByJob[data.id].percent.toFixed(0) }}%
+              <span v-if="progressByJob[data.id].eta">· {{ progressByJob[data.id].eta }}</span>
+            </span>
+          </div>
         </template>
       </Column>
       <Column header="Original" style="width: 7rem">
@@ -190,8 +221,10 @@ onUnmounted(() => {
       <Column header="Saved" style="width: 5rem">
         <template #body="{ data }">{{ savings(data) }}</template>
       </Column>
-      <Column header="Updated" style="width: 10rem">
-        <template #body="{ data }">{{ shortTime(data.updatedAt) }}</template>
+      <Column header="Updated" style="width: 7rem">
+        <template #body="{ data }">
+          <span :title="new Date(data.updatedAt).toLocaleString()">{{ shortTime(data.updatedAt) }}</span>
+        </template>
       </Column>
       <Column header="Error" style="min-width: 10rem">
         <template #body="{ data }">
@@ -319,6 +352,16 @@ onUnmounted(() => {
   color: var(--app-warn-fg);
   font-size: 0.85rem;
   cursor: help;
+}
+.row-progress {
+  margin-top: 0.3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.row-progress-meta {
+  font-size: 0.7rem;
+  color: var(--app-muted);
 }
 .log-dialog {
   display: flex;

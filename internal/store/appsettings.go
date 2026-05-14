@@ -10,6 +10,7 @@ import (
 // so that key names live in exactly one place.
 type AppSettings struct {
 	WorkerIntervalSeconds int    // default 30; clamped to >= 5 at load time
+	MaxParallelEncodes    int    // default 1; clamped to 1..16
 	EncodingWindowStart   string // "HH:MM" or "" (no window)
 	EncodingWindowEnd     string // "HH:MM" or ""
 	NotifyURL             string
@@ -20,6 +21,7 @@ type AppSettings struct {
 // settings table keys — the only place these magic strings should appear.
 const (
 	keyWorkerIntervalSeconds = "worker_interval_seconds"
+	keyMaxParallelEncodes    = "max_parallel_encodes"
 	keyEncodingWindowStart   = "encoding_window_start"
 	keyEncodingWindowEnd     = "encoding_window_end"
 	keyNotifyURL             = "notify_url"
@@ -27,11 +29,17 @@ const (
 	keyNotifyOnFail          = "notify_on_fail"
 )
 
+// MaxParallelEncodesCap is the absolute hard limit on concurrent encodes,
+// regardless of user setting. Prevents pathological values from exhausting
+// file descriptors / RAM.
+const MaxParallelEncodesCap = 16
+
 // LoadAppSettings reads the entire settings table and decodes it into AppSettings, applying
 // defaults for any missing keys.
 func (s *Store) LoadAppSettings(ctx context.Context) (AppSettings, error) {
 	cfg := AppSettings{
 		WorkerIntervalSeconds: 30,
+		MaxParallelEncodes:    1,
 		NotifyOnDone:          true,
 		NotifyOnFail:          true,
 	}
@@ -42,6 +50,14 @@ func (s *Store) LoadAppSettings(ctx context.Context) (AppSettings, error) {
 	if v, ok := all[keyWorkerIntervalSeconds]; ok {
 		if n, err := strconv.Atoi(v); err == nil && n >= 5 {
 			cfg.WorkerIntervalSeconds = n
+		}
+	}
+	if v, ok := all[keyMaxParallelEncodes]; ok {
+		if n, err := strconv.Atoi(v); err == nil && n >= 1 {
+			if n > MaxParallelEncodesCap {
+				n = MaxParallelEncodesCap
+			}
+			cfg.MaxParallelEncodes = n
 		}
 	}
 	cfg.EncodingWindowStart = all[keyEncodingWindowStart]

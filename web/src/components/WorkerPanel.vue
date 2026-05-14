@@ -10,6 +10,7 @@ import type { AppSettings } from "@/types/api";
 
 const notify = useNotify();
 const intervalSeconds = ref<number>(30);
+const maxParallel = ref<number>(1);
 const windowStart = ref<string>("");
 const windowEnd = ref<string>("");
 
@@ -17,6 +18,7 @@ async function load() {
   const s = await notify.tryRun(() => api.settings.get(), "Couldn't load settings");
   if (s) {
     intervalSeconds.value = parseInt(s.worker_interval_seconds ?? "30") || 30;
+    maxParallel.value = parseInt(s.max_parallel_encodes ?? "1") || 1;
     windowStart.value = s.encoding_window_start ?? "";
     windowEnd.value = s.encoding_window_end ?? "";
   }
@@ -27,8 +29,13 @@ async function save() {
     notify.error("Interval must be at least 5 seconds");
     return;
   }
+  if (maxParallel.value < 1 || maxParallel.value > 16) {
+    notify.error("Parallel encodes must be 1..16");
+    return;
+  }
   const updates: AppSettings = {
     worker_interval_seconds: String(intervalSeconds.value),
+    max_parallel_encodes: String(maxParallel.value),
     encoding_window_start: windowStart.value.trim(),
     encoding_window_end: windowEnd.value.trim(),
   };
@@ -57,6 +64,18 @@ onMounted(load);
         <InputNumber v-model="intervalSeconds" :min="5" :max="3600" showButtons />
       </label>
       <p class="muted small">How often the worker polls qBittorrent and picks up ready jobs. Default: 30.</p>
+
+      <div class="section-title">Concurrency</div>
+
+      <label>
+        <span>Parallel encodes</span>
+        <InputNumber v-model="maxParallel" :min="1" :max="16" showButtons />
+      </label>
+      <p class="muted small">
+        How many encodes can run at once. Default 1. Hardware encoders (NVENC / QSV / VAAPI)
+        share one engine on most cards, so &gt;1 there gives no speed-up. Software encoders
+        (x264 / x265) scale with CPU cores; usually 2 is the sweet spot on 8+ cores.
+      </p>
 
       <div class="section-title">Encoding window</div>
 

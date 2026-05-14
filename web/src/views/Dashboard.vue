@@ -13,13 +13,30 @@ import { useNotify } from "@/composables/useNotify";
 import type { Job, JobStats, JobStatus, WorkerStatus } from "@/types/api";
 
 const notify = useNotify();
-const { progress } = useEncodeProgress();
-const isEncoding = computed(() => progress.value.jobId !== 0);
+const { progressByJob, prune } = useEncodeProgress();
 
 const stats = ref<JobStats | null>(null);
 const recentJobs = ref<Job[]>([]);
 const workerStatus = ref<WorkerStatus | null>(null);
 let timer: number | null = null;
+
+// Sorted list of in-flight encodes for rendering. Prefer SSE map; fall back to
+// the worker-status snapshot if SSE hasn't delivered an event yet (first paint).
+const activeEncodes = computed(() => {
+  const ids = workerStatus.value?.encodingJobIds ?? [];
+  return ids.map((id) => {
+    const live = progressByJob.value[id];
+    if (live) return live;
+    const snap = workerStatus.value?.progress.find((p) => p.jobId === id);
+    return snap ?? { jobId: id, title: `job #${id}`, percent: 0, fps: 0, eta: "" };
+  });
+});
+
+const slotsLabel = computed(() => {
+  const ws = workerStatus.value;
+  if (!ws) return "";
+  return `${ws.encodingJobIds.length} / ${ws.maxParallelEncodes} slot${ws.maxParallelEncodes === 1 ? "" : "s"} in use`;
+});
 
 async function load() {
   const res = await notify.tryRun(
@@ -30,6 +47,8 @@ async function load() {
     stats.value = res[0];
     recentJobs.value = res[1].slice(0, 10);
     workerStatus.value = res[2];
+    // Authoritative active set — drops any stale entries SSE missed.
+    prune(res[2].encodingJobIds);
   }
 }
 
@@ -88,41 +107,55 @@ onUnmounted(() => {
         <div class="stat-value">{{ formatBytes(stats.totalSavedBytes) }}</div>
         <div class="stat-label">Total saved</div>
       </div>
-      <div class="stat-card done">
+      <RouterLink class="stat-card done" :to="{ name: 'jobs', query: { status: 'done' } }">
         <div class="stat-value">{{ stats.done }}</div>
         <div class="stat-label">Done</div>
-      </div>
-      <div class="stat-card encoding">
+      </RouterLink>
+      <RouterLink class="stat-card encoding" :to="{ name: 'jobs', query: { status: 'encoding' } }">
         <div class="stat-value">{{ stats.encoding }}</div>
         <div class="stat-label">Encoding</div>
-      </div>
-      <div class="stat-card queued">
+      </RouterLink>
+      <RouterLink class="stat-card queued" :to="{ name: 'jobs', query: { status: 'ready' } }">
         <div class="stat-value">{{ stats.ready + stats.waitingForSeed }}</div>
         <div class="stat-label">Queued</div>
-      </div>
-      <div class="stat-card failed">
+      </RouterLink>
+      <RouterLink class="stat-card failed" :to="{ name: 'jobs', query: { status: 'failed' } }">
         <div class="stat-value">{{ stats.failed }}</div>
         <div class="stat-label">Failed</div>
-      </div>
+      </RouterLink>
     </div>
 
-    <div v-if="isEncoding" class="encode-card">
-      <div class="encode-head">
+    <div v-if="activeEncodes.length" class="encode-list">
+      <div class="encode-list-head">
         <span class="encode-label">Encoding</span>
-        <span class="encode-title">{{ progress.title }}</span>
-        <span class="encode-eta" v-if="progress.eta">ETA {{ progress.eta }}</span>
+        <span class="muted small">{{ slotsLabel }}</span>
       </div>
-      <ProgressBar :value="Math.round(progress.percent * 10) / 10" />
-      <div class="encode-meta">
-        <span>{{ progress.percent.toFixed(1) }}%</span>
-        <span v-if="progress.fps">{{ progress.fps.toFixed(1) }} fps</span>
+      <div
+        v-for="ev in activeEncodes"
+        :key="ev.jobId"
+        class="encode-card"
+      >
+        <div class="encode-head">
+          <span class="encode-title" :title="ev.title">{{ ev.title }}</span>
+          <span class="encode-eta" v-if="ev.eta">ETA {{ ev.eta }}</span>
+        </div>
+        <ProgressBar :value="Math.round(ev.percent * 10) / 10" />
+        <div class="encode-meta">
+          <span>{{ ev.percent.toFixed(1) }}%</span>
+          <span v-if="ev.fps">{{ ev.fps.toFixed(1) }} fps</span>
+          <span class="muted small">job #{{ ev.jobId }}</span>
+        </div>
       </div>
     </div>
 
     <div v-if="workerStatus" class="worker-row">
       <span class="worker-label">Worker</span>
       <span :class="workerStatus.isEncoding ? 'worker-encoding' : 'worker-idle'">
-        {{ workerStatus.isEncoding ? `encoding job #${workerStatus.encodingJobId}` : "idle" }}
+        {{
+          workerStatus.isEncoding
+            ? `${workerStatus.encodingJobIds.length} encoding`
+            : "idle"
+        }}
       </span>
       <span
         v-if="workerStatus.window?.hasLimit"
@@ -200,6 +233,14 @@ onUnmounted(() => {
   border-radius: 8px;
   border: 1px solid var(--app-panel-border);
   background: var(--app-panel-bg);
+  text-decoration: none;
+  color: inherit;
+  display: block;
+  transition: transform 0.06s ease, box-shadow 0.1s ease;
+}
+a.stat-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 .stat-card.saved { border-color: var(--app-stat-saved-border); background: var(--app-stat-saved-bg); }
 .stat-card.done  { border-color: var(--app-stat-done-border); background: var(--app-stat-done-bg); }
@@ -265,15 +306,27 @@ h3 {
   font-size: 0.9rem;
 }
 .empty-hint a { color: var(--app-warn-fg); }
+.encode-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+.encode-list-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.25rem;
+}
 .encode-card {
   border: 1px solid var(--app-warn-fg);
   background: var(--app-warn-bg);
   border-radius: 8px;
-  padding: 0.75rem 1rem;
-  margin-bottom: 1rem;
+  padding: 0.6rem 0.9rem;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.4rem;
 }
 .encode-head {
   display: flex;
@@ -287,6 +340,9 @@ h3 {
   text-transform: uppercase;
   letter-spacing: 0.05em;
   font-size: 0.75rem;
+}
+.small {
+  font-size: 0.78rem;
 }
 .encode-title {
   font-weight: 600;

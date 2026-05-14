@@ -6,16 +6,17 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/sratabix/recodarr/internal/arr"
 	"github.com/sratabix/recodarr/internal/handbrake"
 	"github.com/sratabix/recodarr/internal/notify"
 	"github.com/sratabix/recodarr/internal/qbit"
-	"github.com/sratabix/recodarr/internal/arr"
 	"github.com/sratabix/recodarr/internal/store"
 )
 
@@ -53,33 +54,49 @@ type ProgressEvent struct {
 	ETA     string  `json:"eta"`
 }
 
+// activeEncode is the per-job state held while an encode is in flight. The
+// worker holds one of these in `encoding[jobID]` for each running encode.
+type activeEncode struct {
+	cancel       context.CancelFunc
+	title        string
+	lastProgress ProgressEvent
+}
+
 type Worker struct {
-	store          *store.Store
-	mu             sync.Mutex
-	cancelEncoding context.CancelFunc
-	encodingJobID  int64
-	lastTickAt     time.Time
-	currentTitle   string
-	lastProgress   ProgressEvent
-	subscribers    map[chan ProgressEvent]struct{}
+	store       *store.Store
+	mu          sync.Mutex
+	encoding    map[int64]*activeEncode // jobID → in-flight encode state
+	lastTickAt  time.Time
+	subscribers map[chan ProgressEvent]struct{}
 }
 
 func NewWorker(s *store.Store) *Worker {
-	return &Worker{store: s, subscribers: make(map[chan ProgressEvent]struct{})}
+	return &Worker{
+		store:       s,
+		encoding:    make(map[int64]*activeEncode),
+		subscribers: make(map[chan ProgressEvent]struct{}),
+	}
 }
 
-// Subscribe returns a channel that receives progress events for the currently-encoding job.
-// The caller must call the returned cancel func when done; the channel is closed by the worker.
+// Subscribe returns a channel that receives progress events for any
+// currently-encoding job. Each event carries its JobID so consumers can
+// route them. Caller must invoke the returned cancel to stop receiving.
 func (w *Worker) Subscribe() (<-chan ProgressEvent, func()) {
-	ch := make(chan ProgressEvent, 8)
+	ch := make(chan ProgressEvent, 16)
 	w.mu.Lock()
 	w.subscribers[ch] = struct{}{}
-	last := w.lastProgress
-	hasLast := w.encodingJobID != 0
+	// Replay the latest known progress for each in-flight job so a fresh
+	// subscriber doesn't have to wait for the next progress tick to see state.
+	snapshots := make([]ProgressEvent, 0, len(w.encoding))
+	for _, ae := range w.encoding {
+		if ae.lastProgress.JobID != 0 {
+			snapshots = append(snapshots, ae.lastProgress)
+		}
+	}
 	w.mu.Unlock()
-	if hasLast && last.JobID != 0 {
+	for _, ev := range snapshots {
 		select {
-		case ch <- last:
+		case ch <- ev:
 		default:
 		}
 	}
@@ -93,19 +110,43 @@ func (w *Worker) Subscribe() (<-chan ProgressEvent, func()) {
 	}
 }
 
-// CurrentProgress returns the most recent progress event (zero-value if not encoding).
+// CurrentProgress returns one in-flight job's most recent progress event
+// (the one with the lowest job id, deterministically). Returns zero-value
+// when nothing is encoding. Kept for back-compat with the single-job UI.
+// Use AllProgress for full multi-job state.
 func (w *Worker) CurrentProgress() ProgressEvent {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.encodingJobID == 0 {
+	ids := make([]int64, 0, len(w.encoding))
+	for id := range w.encoding {
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
 		return ProgressEvent{}
 	}
-	return w.lastProgress
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return w.encoding[ids[0]].lastProgress
+}
+
+// AllProgress returns the latest progress event for every in-flight encode.
+func (w *Worker) AllProgress() []ProgressEvent {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	out := make([]ProgressEvent, 0, len(w.encoding))
+	for _, ae := range w.encoding {
+		if ae.lastProgress.JobID != 0 {
+			out = append(out, ae.lastProgress)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].JobID < out[j].JobID })
+	return out
 }
 
 func (w *Worker) broadcast(ev ProgressEvent) {
 	w.mu.Lock()
-	w.lastProgress = ev
+	if ae, ok := w.encoding[ev.JobID]; ok {
+		ae.lastProgress = ev
+	}
 	subs := make([]chan ProgressEvent, 0, len(w.subscribers))
 	for ch := range w.subscribers {
 		subs = append(subs, ch)
@@ -120,23 +161,39 @@ func (w *Worker) broadcast(ev ProgressEvent) {
 	}
 }
 
-// CancelEncoding cancels the currently running encode for jobID.
+// CancelEncoding cancels the running encode for jobID.
 // Returns true if the job was active and cancellation was sent.
 func (w *Worker) CancelEncoding(jobID int64) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.encodingJobID != jobID || w.cancelEncoding == nil {
+	ae, ok := w.encoding[jobID]
+	if !ok {
 		return false
 	}
-	w.cancelEncoding()
+	ae.cancel()
 	return true
 }
 
-// EncodingJobID returns the ID of the currently encoding job (0 if none).
+// EncodingJobID returns the lowest in-flight job id, or 0 if none.
+// Kept as the legacy single-job accessor; use EncodingJobIDs for the full set.
 func (w *Worker) EncodingJobID() int64 {
+	ids := w.EncodingJobIDs()
+	if len(ids) == 0 {
+		return 0
+	}
+	return ids[0]
+}
+
+// EncodingJobIDs returns the ids of every in-flight encode, sorted ascending.
+func (w *Worker) EncodingJobIDs() []int64 {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.encodingJobID
+	ids := make([]int64, 0, len(w.encoding))
+	for id := range w.encoding {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return ids
 }
 
 // LastTickAt returns the time of the most recent worker tick (zero if not yet ticked).
@@ -221,7 +278,7 @@ func (w *Worker) tick(ctx context.Context) {
 	w.lastTickAt = time.Now()
 	w.mu.Unlock()
 	w.checkSeeding(ctx)
-	w.runOneEncode(ctx)
+	w.runEncodes(ctx)
 }
 
 // checkSeeding moves jobs from waiting_for_seed → ready when qBit no longer holds the torrent.
@@ -282,73 +339,100 @@ func (w *Worker) transition(ctx context.Context, id int64, from, to, reason stri
 	}
 }
 
-// runOneEncode picks a single ready job and runs it to completion.
-func (w *Worker) runOneEncode(ctx context.Context) {
+// runEncodes claims as many ready jobs as the configured concurrency allows and
+// launches each in its own goroutine. It does NOT wait for them — they run
+// independently and free their slot on completion.
+func (w *Worker) runEncodes(ctx context.Context) {
 	if !w.inEncodingWindow(ctx) {
 		slog.Debug("outside encoding window, skipping encode")
 		return
 	}
+	cfg, _ := w.store.LoadAppSettings(ctx)
+	maxParallel := cfg.MaxParallelEncodes
+	if maxParallel < 1 {
+		maxParallel = 1
+	}
 
-	jobs, err := w.store.JobsByStatus(ctx, string(StatusReady), 1)
-	if err != nil {
-		slog.Error("runOneEncode list", "err", err)
+	w.mu.Lock()
+	slots := maxParallel - len(w.encoding)
+	w.mu.Unlock()
+	if slots <= 0 {
 		return
 	}
-	if len(jobs) == 0 {
-		return
-	}
-	j := jobs[0]
 
-	claimed, err := w.store.MarkJobEncoding(ctx, j.ID)
+	jobs, err := w.store.JobsByStatus(ctx, string(StatusReady), slots)
 	if err != nil {
-		slog.Error("claim job", "id", j.ID, "err", err)
+		slog.Error("runEncodes list", "err", err)
 		return
 	}
-	if !claimed {
-		// Either we raced another tick or this job has hit MaxJobAttempts. The
-		// row is still 'ready'; if attempts is already at the cap, fail it now
-		// so it stops blocking the queue.
-		if j.Attempts >= store.MaxJobAttempts {
-			_ = w.store.MarkJobFailed(ctx, j.ID,
-				fmt.Sprintf("gave up after %d attempts", j.Attempts), "")
-			slog.Warn("job exceeded max attempts", "id", j.ID, "attempts", j.Attempts)
+	for _, j := range jobs {
+		claimed, err := w.store.MarkJobEncoding(ctx, j.ID)
+		if err != nil {
+			slog.Error("claim job", "id", j.ID, "err", err)
+			continue
 		}
-		return
+		if !claimed {
+			// Either we raced (shouldn't happen — only this goroutine claims) or
+			// attempts cap was hit; auto-fail in the latter case so the queue moves.
+			if j.Attempts >= store.MaxJobAttempts {
+				_ = w.store.MarkJobFailed(ctx, j.ID,
+					fmt.Sprintf("gave up after %d attempts", j.Attempts), "")
+				slog.Warn("job exceeded max attempts", "id", j.ID, "attempts", j.Attempts)
+			}
+			continue
+		}
+		w.startEncode(ctx, j)
 	}
+}
 
+// startEncode registers the job in the encoding map and launches the encode
+// goroutine. Returns immediately.
+func (w *Worker) startEncode(parentCtx context.Context, j store.JobRow) {
+	encCtx, cancel := context.WithCancel(parentCtx)
+	ae := &activeEncode{
+		cancel:       cancel,
+		title:        j.Title,
+		lastProgress: ProgressEvent{JobID: j.ID, Title: j.Title},
+	}
+	w.mu.Lock()
+	w.encoding[j.ID] = ae
+	w.mu.Unlock()
+
+	go func() {
+		defer func() {
+			cancel()
+			w.mu.Lock()
+			delete(w.encoding, j.ID)
+			w.mu.Unlock()
+			// Signal subscribers that this job's slot is free with a zero-percent
+			// event tagged with the JobID so the UI can clean up its row.
+			w.broadcast(ProgressEvent{JobID: j.ID, Title: j.Title})
+		}()
+		w.encodeOne(encCtx, parentCtx, j)
+	}()
+}
+
+// encodeOne runs HandBrake on a single claimed job. encCtx is cancellable per-job
+// (used to terminate the running HandBrakeCLI process); parentCtx is the worker's
+// long-lived context used for DB writes that must complete even if the per-job
+// context was cancelled.
+func (w *Worker) encodeOne(encCtx, parentCtx context.Context, j store.JobRow) {
 	if !j.ProfileID.Valid {
-		_ = w.store.MarkJobFailed(ctx, j.ID, "no profile assigned (tag-profile mapping missing)", "")
+		_ = w.store.MarkJobFailed(parentCtx, j.ID, "no profile assigned (tag-profile mapping missing)", "")
 		slog.Error("job missing profile", "id", j.ID)
 		return
 	}
-	profile, err := w.store.GetProfile(ctx, j.ProfileID.Int64)
+	profile, err := w.store.GetProfile(parentCtx, j.ProfileID.Int64)
 	if err != nil {
-		_ = w.store.MarkJobFailed(ctx, j.ID, "profile lookup: "+err.Error(), "")
+		_ = w.store.MarkJobFailed(parentCtx, j.ID, "profile lookup: "+err.Error(), "")
 		return
 	}
 
 	if err := checkDiskSpace(j.FilePath, j.FileSize); err != nil {
-		_ = w.store.MarkJobFailed(ctx, j.ID, err.Error(), "")
+		_ = w.store.MarkJobFailed(parentCtx, j.ID, err.Error(), "")
 		slog.Error("disk space check failed", "id", j.ID, "err", err)
 		return
 	}
-
-	encCtx, encCancel := context.WithCancel(ctx)
-	w.mu.Lock()
-	w.encodingJobID = j.ID
-	w.currentTitle = j.Title
-	w.cancelEncoding = encCancel
-	w.lastProgress = ProgressEvent{JobID: j.ID, Title: j.Title}
-	w.mu.Unlock()
-	defer func() {
-		encCancel()
-		w.mu.Lock()
-		w.encodingJobID = 0
-		w.cancelEncoding = nil
-		w.currentTitle = ""
-		w.lastProgress = ProgressEvent{}
-		w.mu.Unlock()
-	}()
 
 	slog.Info("encoding", "id", j.ID, "title", j.Title, "path", j.FilePath, "encoder", profile.Encoder)
 	onProgress := func(p handbrake.Progress) {
@@ -378,20 +462,20 @@ func (w *Worker) runOneEncode(ctx context.Context) {
 			msg = "cancelled"
 		}
 		encLog := truncateLog(result.Log, 200)
-		_ = w.store.MarkJobFailed(ctx, j.ID, msg, encLog)
+		_ = w.store.MarkJobFailed(parentCtx, j.ID, msg, encLog)
 		slog.Error("encode failed", "id", j.ID, "err", msg)
 		go notify.Send(context.Background(), w.store, j.Title, "failed", j.FilePath, j.FileSize, 0)
 		return
 	}
 
-	if err := w.store.MarkJobDone(ctx, j.ID, result.FinalSize); err != nil {
+	if err := w.store.MarkJobDone(parentCtx, j.ID, result.FinalSize); err != nil {
 		slog.Error("mark done", "id", j.ID, "err", err)
 		return
 	}
 	slog.Info("encode done", "id", j.ID, "originalSize", j.FileSize, "finalSize", result.FinalSize)
 	go notify.Send(context.Background(), w.store, j.Title, "done", j.FilePath, j.FileSize, result.FinalSize)
 
-	w.refreshArr(ctx, j)
+	w.refreshArr(parentCtx, j)
 }
 
 // checkDiskSpace verifies the directory containing path has at least 1.1× needed bytes free.
@@ -404,7 +488,7 @@ func checkDiskSpace(path string, needed int64) error {
 		return nil
 	}
 	available := int64(stat.Bavail) * int64(stat.Bsize) //nolint:unconvert // Bavail/Bsize types differ across GOOS
-	required := needed + needed/10 // 110% of source size
+	required := needed + needed/10                      // 110% of source size
 	if available < required {
 		return fmt.Errorf("insufficient disk space: need %s, have %s",
 			formatBytes(required), formatBytes(available))
