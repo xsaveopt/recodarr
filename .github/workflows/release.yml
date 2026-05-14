@@ -21,14 +21,6 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Go vet
-        run: go vet ./...
-
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -47,9 +39,19 @@ jobs:
         run: npm run lint
         working-directory: web
 
+      # SPA must be built before any go command, because web/embed.go uses
+      # //go:embed all:dist and the pattern fails when web/dist/ is empty.
       - name: Frontend build
         run: npm run build
         working-directory: web
+
+      - name: Go vet
+        run: go vet ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
 
       - name: Go build (with embedded SPA)
         run: go build -trimpath -ldflags="-s -w" ./...
