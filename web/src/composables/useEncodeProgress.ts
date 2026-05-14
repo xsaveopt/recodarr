@@ -21,7 +21,7 @@ export interface EncodeProgress {
  * job from the map. Callers that poll /api/worker/status can also call prune()
  * with the authoritative active set to clean up if SSE missed an event.
  */
-export function useEncodeProgress() {
+export function useEncodeProgress(opts?: { onComplete?: (jobId: number) => void }) {
   const progressByJob = ref<Record<number, EncodeProgress>>({});
   const connected = ref(false);
 
@@ -40,9 +40,14 @@ export function useEncodeProgress() {
     // has percent=0 but typically arrives within a tick of follow-up progress,
     // so worst case we briefly drop and re-add a row. Acceptable.
     if (ev.percent === 0 && ev.fps === 0 && !ev.eta) {
+      const had = progressByJob.value[ev.jobId] != null;
       const next = { ...progressByJob.value };
       delete next[ev.jobId];
       progressByJob.value = next;
+      // Only fire onComplete if we actually had a tracked encode for this job;
+      // ignore the spurious zero events that arrive before the first progress
+      // tick on a brand-new encode.
+      if (had) opts?.onComplete?.(ev.jobId);
       return;
     }
     progressByJob.value = { ...progressByJob.value, [ev.jobId]: ev };

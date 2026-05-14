@@ -13,12 +13,30 @@ import { useNotify } from "@/composables/useNotify";
 import type { Job, JobStats, JobStatus, WorkerStatus } from "@/types/api";
 
 const notify = useNotify();
-const { progressByJob, prune } = useEncodeProgress();
-
 const stats = ref<JobStats | null>(null);
 const recentJobs = ref<Job[]>([]);
 const workerStatus = ref<WorkerStatus | null>(null);
 let timer: number | null = null;
+
+// When SSE signals an encode finished, optimistically strip the id from our
+// local worker-status mirror so the row vanishes immediately, and trigger a
+// refresh to reconcile. Without this, the row lingers until the next 10s poll
+// because the snapshot still lists the id with its last-known percent.
+const { progressByJob, prune } = useEncodeProgress({
+  onComplete: (jobId) => {
+    if (workerStatus.value) {
+      const ids = workerStatus.value.encodingJobIds.filter((i) => i !== jobId);
+      workerStatus.value = {
+        ...workerStatus.value,
+        encodingJobIds: ids,
+        encodingJobId: ids[0] ?? 0,
+        isEncoding: ids.length > 0,
+        progress: workerStatus.value.progress.filter((p) => p.jobId !== jobId),
+      };
+    }
+    void load();
+  },
+});
 
 // Sorted list of in-flight encodes for rendering. Prefer SSE map; fall back to
 // the worker-status snapshot if SSE hasn't delivered an event yet (first paint).
