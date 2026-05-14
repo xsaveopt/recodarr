@@ -39,12 +39,12 @@ func (c *Client) Login(ctx context.Context) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	// qBittorrent's CSRF protection rejects requests whose Referer/Origin don't match
-	// the Host the request lands on (and 4.5+ requires Origin specifically). Setting
-	// both to baseURL works because Go's http client also derives Host from baseURL.
-	req.Header.Set("Referer", c.baseURL)
-	req.Header.Set("Origin", c.baseURL)
 	req.Header.Set("User-Agent", "Recodarr")
+	// Intentionally do NOT set Origin/Referer. qBit's CSRF check (see isCrossSiteRequest
+	// in webapplication.cpp) treats requests with neither header as same-origin and lets
+	// them through; setting Origin triggers a strict host-equality check that fails on
+	// any reverse-proxy / port-forward / hostname-vs-IP mismatch. Sonarr and Radarr
+	// rely on the same omission.
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return err
@@ -60,10 +60,20 @@ func (c *Client) Login(ctx context.Context) error {
 	case resp.StatusCode == http.StatusForbidden:
 		return fmt.Errorf("qbit returned 403 (likely IP-banned after failed attempts; restart qBittorrent or wait the ban out)")
 	case resp.StatusCode == http.StatusUnauthorized:
-		return fmt.Errorf("qbit returned 401 (host/origin mismatch; check qBittorrent's Web UI \"Host header validation\" and \"Bypass authentication for clients on whitelisted IP subnets\" settings — the URL Recodarr uses must match what qBit expects). Body: %q", trimmed)
+		return fmt.Errorf(`qbit returned 401. Most likely qBit's "Server domains" (Tools → Options → Web UI) is set to something restrictive that excludes %q. Default is "*" which allows everything. Body: %q`, hostOnly(c.baseURL), trimmed)
 	default:
 		return fmt.Errorf("qbit login failed: status=%d body=%q", resp.StatusCode, trimmed)
 	}
+}
+
+// hostOnly strips scheme and port from a URL, leaving just the host part.
+// Used to suggest the value qBit's "Server domains" field needs.
+func hostOnly(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Hostname() == "" {
+		return rawURL
+	}
+	return u.Hostname()
 }
 
 type Torrent struct {
