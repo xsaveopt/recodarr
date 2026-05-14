@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -52,6 +53,18 @@ func (c *Client) Login(ctx context.Context) error {
 	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	trimmed := strings.TrimSpace(string(body))
+
+	if resp.StatusCode != http.StatusOK || trimmed != "Ok." {
+		// Loud diagnostic so we can tell apart CSRF vs. host-validation vs. wrong creds
+		// vs. ban. Includes the actual Host header Go sent and qBit's full response.
+		slog.Warn("qbit login failed",
+			"url", req.URL.String(),
+			"hostHeader", req.Host,
+			"status", resp.StatusCode,
+			"respBody", trimmed,
+			"respHeaders", flattenHeaders(resp.Header),
+		)
+	}
 	switch {
 	case resp.StatusCode == http.StatusOK && trimmed == "Ok.":
 		return nil
@@ -64,6 +77,22 @@ func (c *Client) Login(ctx context.Context) error {
 	default:
 		return fmt.Errorf("qbit login failed: status=%d body=%q", resp.StatusCode, trimmed)
 	}
+}
+
+// flattenHeaders serializes response headers as a single string for logging.
+func flattenHeaders(h http.Header) string {
+	var sb strings.Builder
+	for k, vs := range h {
+		for _, v := range vs {
+			if sb.Len() > 0 {
+				sb.WriteString("; ")
+			}
+			sb.WriteString(k)
+			sb.WriteString("=")
+			sb.WriteString(v)
+		}
+	}
+	return sb.String()
 }
 
 // hostOnly strips scheme and port from a URL, leaving just the host part.
