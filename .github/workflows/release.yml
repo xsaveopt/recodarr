@@ -1,9 +1,11 @@
-name: Release
+name: CI
 
 on:
   push:
+    branches: ["**"]
     tags:
       - "v*.*.*"
+  pull_request:
 
 permissions:
   contents: read
@@ -60,6 +62,8 @@ jobs:
     name: Publish image
     needs: ci
     runs-on: ubuntu-latest
+    # Only publish on version tags. Other pushes/PRs stop after the ci job.
+    if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v4
         with:
