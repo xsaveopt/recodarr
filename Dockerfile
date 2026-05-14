@@ -25,9 +25,11 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     go build -trimpath -ldflags="-s -w" -o /out/recodarr ./cmd/recodarr
 
-# 3. Runtime — Debian bookworm-slim with HandBrakeCLI + Intel/AMD VAAPI/QSV libs.
+# 3. Runtime — Debian bookworm-slim with HandBrakeCLI + (on amd64) Intel/AMD VAAPI/QSV libs.
 #    NVENC works at runtime via nvidia-container-toolkit (no extra image deps needed).
+#    intel-media-va-driver is x86-only; arm64 skips it.
 FROM debian:bookworm-slim
+ARG TARGETARCH
 ENV DEBIAN_FRONTEND=noninteractive \
     RECODARR_DATA_DIR=/data \
     RECODARR_ADDR=:8080
@@ -36,8 +38,10 @@ RUN echo "deb http://deb.debian.org/debian bookworm main contrib non-free non-fr
     && apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates tzdata \
         handbrake-cli \
-        intel-media-va-driver \
         libva-drm2 libva2 vainfo \
+    && if [ "$TARGETARCH" = "amd64" ]; then \
+         apt-get install -y --no-install-recommends intel-media-va-driver; \
+       fi \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd -r recodarr && useradd -r -g recodarr -u 10001 -d /data -s /usr/sbin/nologin recodarr \
