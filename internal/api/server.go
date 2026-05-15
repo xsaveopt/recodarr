@@ -12,6 +12,7 @@ import (
 	"github.com/sratabix/recodarr/internal/arr"
 	"github.com/sratabix/recodarr/internal/auth"
 	"github.com/sratabix/recodarr/internal/job"
+	"github.com/sratabix/recodarr/internal/metrics"
 	"github.com/sratabix/recodarr/internal/store"
 )
 
@@ -62,6 +63,12 @@ func NewRouter(st *store.Store, worker *job.Worker, assets fs.FS) http.Handler {
 			})
 		})
 	})
+
+	// Prometheus scrape endpoint. Mounted outside /api so it isn't behind the
+	// session-cookie auth middleware. Optional bearer-token gate via
+	// RECODARR_METRICS_TOKEN; without it, /metrics is anonymous (matching the
+	// convention for self-hosted exporters — no secrets are emitted).
+	r.Method("GET", "/metrics", metrics.Handler(st, worker, os.Getenv("RECODARR_METRICS_TOKEN")))
 
 	// Webhooks authenticate via per-instance HTTP Basic auth (see webhooks.go).
 	// 1 MiB body cap; *arr Connect payloads are well under this.

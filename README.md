@@ -4,7 +4,7 @@ Auto re-encodes downloaded series and movies via HandBrake. Sits alongside Sonar
 
 ## How it works
 
-Sonarr or Radarr imports a file and POSTs a webhook to Recodarr. If the item carries a tag that you've mapped to a profile, Recodarr queues a job. Every 30 seconds the worker checks qBittorrent: when the torrent is no longer seeding, the job becomes ready. The worker then runs HandBrakeCLI on the imported library file, writes to a sibling temp file, and atomically renames over the original. Finally it asks *arr to refresh so the new file size shows up.
+Sonarr or Radarr imports a file and POSTs a webhook to Recodarr. If the item carries a tag that you've mapped to a profile, Recodarr queues a job. Every 30 seconds the worker checks qBittorrent: when the torrent is no longer seeding, the job becomes ready. The worker then runs HandBrakeCLI on the imported library file, writes to a sibling temp file, and atomically renames over the original. Finally it asks \*arr to refresh so the new file size shows up.
 
 Files without a mapped tag are ignored.
 
@@ -42,7 +42,7 @@ See the GPU acceleration section below to add hardware encode/decode.
 
 2. **qBittorrent**: Settings, qBittorrent. Add your qBit URL and credentials. Without this, jobs sit in `waiting_for_seed` forever.
 
-3. **Sonarr / Radarr**: Settings, Sonarr / Radarr. Add an instance. After saving, click **Show** on the instance row to reveal the webhook URL plus a generated username and password. In *arr, go to Settings, Connect, add a Webhook with:
+3. **Sonarr / Radarr**: Settings, Sonarr / Radarr. Add an instance. After saving, click **Show** on the instance row to reveal the webhook URL plus a generated username and password. In \*arr, go to Settings, Connect, add a Webhook with:
    - URL: as shown
    - Method: POST
    - Triggers: tick **On File Import** (and **On File Upgrade** if you also want re-encodes after a quality upgrade)
@@ -50,7 +50,7 @@ See the GPU acceleration section below to add hardware encode/decode.
 
    Auth is required. Unauthenticated webhooks are rejected.
 
-4. **Tag your items**: in *arr, create a tag (e.g. `recodarr`) and apply it to the series or movies you want re-encoded.
+4. **Tag your items**: in \*arr, create a tag (e.g. `recodarr`) and apply it to the series or movies you want re-encoded.
 
 5. **Mapping**: Settings, Mappings. Add a row pointing the tag at a profile. Items without a matching tag are ignored.
 
@@ -60,7 +60,37 @@ Settings, Worker. Set a start and end time in `HH:MM` to restrict when encodes c
 
 ## Failed jobs
 
-Failed jobs are listed on the Jobs page. Click the error message to see the full HandBrake output. Use Retry to re-queue. A job that fails to start five times in a row is given up on automatically; retrying resets the counter. If the encode succeeds but the *arr refresh call fails, the job is marked done and the refresh error is shown next to it.
+Failed jobs are listed on the Jobs page. Click the error message to see the full HandBrake output. Use Retry to re-queue. A job that fails to start five times in a row is given up on automatically; retrying resets the counter. If the encode succeeds but the \*arr refresh call fails, the job is marked done and the refresh error is shown next to it.
+
+## Prometheus metrics
+
+A Prometheus scrape endpoint is exposed at `/metrics`. It's mounted outside the authenticated API, so scrapers don't need a session cookie. By default it's open — only counters and gauges are emitted, never secrets — but you can require a bearer token by setting `RECODARR_METRICS_TOKEN`.
+
+```yaml
+scrape_configs:
+  - job_name: recodarr
+    static_configs:
+      - targets: ["recodarr:8080"]
+    # Only if RECODARR_METRICS_TOKEN is set:
+    # authorization:
+    #   credentials: your-token
+```
+
+Series exposed:
+
+| Metric                                        | Type  | Description                                                                             |
+| --------------------------------------------- | ----- | --------------------------------------------------------------------------------------- |
+| `recodarr_jobs{status}`                       | gauge | Jobs in the queue by status (`waiting_for_seed`, `ready`, `encoding`, `done`, `failed`) |
+| `recodarr_bytes_saved_total`                  | gauge | Sum of `original_size − final_size` across completed jobs                               |
+| `recodarr_worker_active_encodes`              | gauge | Encodes running right now                                                               |
+| `recodarr_worker_max_parallel_encodes`        | gauge | Configured concurrency cap                                                              |
+| `recodarr_worker_window_active`               | gauge | `1` if inside the configured encoding window (or no window set), `0` outside            |
+| `recodarr_worker_last_tick_timestamp_seconds` | gauge | Unix time of the most recent worker tick                                                |
+| `recodarr_handbrake_available`                | gauge | `1` if `HandBrakeCLI` was found on PATH at startup                                      |
+| `recodarr_encode_progress_percent{job_id}`    | gauge | Live percent for each in-flight encode                                                  |
+| `recodarr_encode_fps{job_id}`                 | gauge | Live FPS for each in-flight encode                                                      |
+
+Plus the standard `go_*` runtime and `process_*` collectors.
 
 ## GPU acceleration
 
@@ -73,16 +103,16 @@ For each vendor: encoder names use that family's prefix (`nvenc_`, `qsv_`, `vce_
 Host: install `nvidia-container-toolkit`, then `sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker`. Verify with `nvidia-smi` on the host.
 
 ```yaml
-    environment:
-      NVIDIA_VISIBLE_DEVICES: all
-      NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+environment:
+  NVIDIA_VISIBLE_DEVICES: all
+  NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
+deploy:
+  resources:
+    reservations:
+      devices:
+        - driver: nvidia
+          count: all
+          capabilities: [gpu]
 ```
 
 Encoders: `nvenc_h264`, `nvenc_h265`, `nvenc_h265_10bit`, `nvenc_av1` (Ada and newer).
@@ -94,11 +124,11 @@ Pascal cards (P4/P40/P100/GTX 10xx) do not support `temporal-aq=1`, HEVC B-frame
 Host: nothing special. Confirm `/dev/dri/renderD128` exists.
 
 ```yaml
-    devices:
-      - /dev/dri:/dev/dri
-    group_add:
-      - "104"   # render, match host: getent group render | cut -d: -f3
-      - "44"    # video
+devices:
+  - /dev/dri:/dev/dri
+group_add:
+  - "104" # render, match host: getent group render | cut -d: -f3
+  - "44" # video
 ```
 
 Encoders: `qsv_h264`, `qsv_h265`, `qsv_h265_10bit`, `qsv_av1` (Arc / 11th-gen+).
@@ -110,11 +140,11 @@ Older iGPUs (Haswell through Skylake) only do H.264 reliably; HEVC needs Kaby La
 Host: nothing special. Confirm `/dev/dri/renderD128` exists.
 
 ```yaml
-    devices:
-      - /dev/dri:/dev/dri
-    group_add:
-      - "104"
-      - "44"
+devices:
+  - /dev/dri:/dev/dri
+group_add:
+  - "104"
+  - "44"
 ```
 
 Encoders: `vce_h264`, `vce_h265`, `vce_h265_10bit`, `vce_av1` (RX 7000 series and newer).
@@ -129,7 +159,7 @@ VideoToolbox only works when running the Recodarr binary natively on macOS, not 
 
 ## Environment variables
 
-`RECODARR_ADDR` (default `:8080`), `RECODARR_DATA_DIR` (default `/data`, mount this), `TZ` for log timestamps. Everything else lives in SQLite and is managed through the web UI.
+`RECODARR_ADDR` (default `:8080`), `RECODARR_DATA_DIR` (default `/data`, mount this), `TZ` for log timestamps, `RECODARR_METRICS_TOKEN` (optional, gates `/metrics` behind a bearer token). Everything else lives in SQLite and is managed through the web UI.
 
 ## CLI
 

@@ -1,0 +1,196 @@
+// Package metrics exposes Recodarr internals to Prometheus.
+//
+// Mounted by the API router at /metrics, outside the /api group so it's not
+// behind the session-cookie auth middleware. If RECODARR_METRICS_TOKEN is set,
+// the handler requires `Authorization: Bearer <token>`; otherwise it's open
+// (which is the conventional setup for self-hosted apps — no secrets are
+// emitted, only counts and timestamps).
+//
+// Strategy: a single Collector pulls live values on each scrape via
+// Store.GetJobStats and Worker accessors. This avoids having to instrument
+// every job state transition; Prometheus only samples on its own schedule
+// (typically 15–60s) and the queries are cheap (one COUNT(*) GROUP BY status
+// + a few in-memory mutex reads).
+package metrics
+
+import (
+	"context"
+	"crypto/subtle"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"github.com/sratabix/recodarr/internal/handbrake"
+	"github.com/sratabix/recodarr/internal/job"
+	"github.com/sratabix/recodarr/internal/store"
+)
+
+// scrapeTimeout caps a single /metrics request so a slow DB doesn't block
+// Prometheus indefinitely. The collector falls back to its last cached values
+// on timeout — better than failing the entire scrape.
+const scrapeTimeout = 5 * time.Second
+
+// Handler returns an http.Handler that serves Prometheus metrics. token is the
+// optional bearer token; empty string disables auth.
+func Handler(st *store.Store, w *job.Worker, token string) http.Handler {
+	reg := prometheus.NewRegistry()
+	reg.MustRegister(
+		collectors.NewGoCollector(),
+		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
+		newCollector(st, w),
+	)
+
+	h := promhttp.HandlerFor(reg, promhttp.HandlerOpts{
+		Registry:          reg,
+		EnableOpenMetrics: true,
+	})
+
+	if token == "" {
+		return h
+	}
+	expected := []byte("Bearer " + token)
+	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		got := r.Header.Get("Authorization")
+		if subtle.ConstantTimeCompare([]byte(got), expected) != 1 {
+			rw.Header().Set("WWW-Authenticate", `Bearer realm="metrics"`)
+			http.Error(rw, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		h.ServeHTTP(rw, r)
+	})
+}
+
+// collector is a prometheus.Collector that snapshots Recodarr state on each
+// scrape. Implementing the Collector interface (rather than registering one
+// gauge per metric and updating in handler) keeps reads atomic per-scrape and
+// avoids a goroutine just to refresh values.
+type collector struct {
+	store  *store.Store
+	worker *job.Worker
+
+	jobsByStatus *prometheus.Desc
+	bytesSaved   *prometheus.Desc
+	activeEnc    *prometheus.Desc
+	maxParallel  *prometheus.Desc
+	windowActive *prometheus.Desc
+	lastTick     *prometheus.Desc
+	hbAvail      *prometheus.Desc
+	encodePct    *prometheus.Desc
+	encodeFps    *prometheus.Desc
+}
+
+func newCollector(st *store.Store, w *job.Worker) *collector {
+	return &collector{
+		store:  st,
+		worker: w,
+
+		jobsByStatus: prometheus.NewDesc(
+			"recodarr_jobs",
+			"Number of jobs in the queue, partitioned by status.",
+			[]string{"status"}, nil,
+		),
+		bytesSaved: prometheus.NewDesc(
+			"recodarr_bytes_saved_total",
+			"Total bytes reclaimed by completed encodes (sum of original_size − final_size for status=done).",
+			nil, nil,
+		),
+		activeEnc: prometheus.NewDesc(
+			"recodarr_worker_active_encodes",
+			"Number of encodes currently running.",
+			nil, nil,
+		),
+		maxParallel: prometheus.NewDesc(
+			"recodarr_worker_max_parallel_encodes",
+			"Configured upper bound on concurrent encodes.",
+			nil, nil,
+		),
+		windowActive: prometheus.NewDesc(
+			"recodarr_worker_window_active",
+			"1 if the worker is inside its configured encoding window (or no window is set), 0 if outside.",
+			nil, nil,
+		),
+		lastTick: prometheus.NewDesc(
+			"recodarr_worker_last_tick_timestamp_seconds",
+			"Unix timestamp of the worker's most recent tick. 0 if never ticked.",
+			nil, nil,
+		),
+		hbAvail: prometheus.NewDesc(
+			"recodarr_handbrake_available",
+			"1 if HandBrakeCLI was discovered on PATH at startup, 0 otherwise.",
+			nil, nil,
+		),
+		encodePct: prometheus.NewDesc(
+			"recodarr_encode_progress_percent",
+			"Percent complete of each in-flight encode (0–100).",
+			[]string{"job_id"}, nil,
+		),
+		encodeFps: prometheus.NewDesc(
+			"recodarr_encode_fps",
+			"Live frames-per-second for each in-flight encode.",
+			[]string{"job_id"}, nil,
+		),
+	}
+}
+
+func (c *collector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- c.jobsByStatus
+	ch <- c.bytesSaved
+	ch <- c.activeEnc
+	ch <- c.maxParallel
+	ch <- c.windowActive
+	ch <- c.lastTick
+	ch <- c.hbAvail
+	ch <- c.encodePct
+	ch <- c.encodeFps
+}
+
+func (c *collector) Collect(ch chan<- prometheus.Metric) {
+	ctx, cancel := context.WithTimeout(context.Background(), scrapeTimeout)
+	defer cancel()
+
+	if stats, err := c.store.GetJobStats(ctx); err == nil {
+		ch <- prometheus.MustNewConstMetric(c.jobsByStatus, prometheus.GaugeValue, float64(stats.WaitingForSeed), "waiting_for_seed")
+		ch <- prometheus.MustNewConstMetric(c.jobsByStatus, prometheus.GaugeValue, float64(stats.Ready), "ready")
+		ch <- prometheus.MustNewConstMetric(c.jobsByStatus, prometheus.GaugeValue, float64(stats.Encoding), "encoding")
+		ch <- prometheus.MustNewConstMetric(c.jobsByStatus, prometheus.GaugeValue, float64(stats.Done), "done")
+		ch <- prometheus.MustNewConstMetric(c.jobsByStatus, prometheus.GaugeValue, float64(stats.Failed), "failed")
+		ch <- prometheus.MustNewConstMetric(c.bytesSaved, prometheus.GaugeValue, float64(stats.TotalSavedBytes))
+	}
+
+	ch <- prometheus.MustNewConstMetric(c.activeEnc, prometheus.GaugeValue, float64(len(c.worker.EncodingJobIDs())))
+
+	if cfg, err := c.store.LoadAppSettings(ctx); err == nil {
+		ch <- prometheus.MustNewConstMetric(c.maxParallel, prometheus.GaugeValue, float64(cfg.MaxParallelEncodes))
+	}
+
+	ws := c.worker.WindowStatus(ctx)
+	windowActive := 0.0
+	if ws.Active {
+		windowActive = 1.0
+	}
+	ch <- prometheus.MustNewConstMetric(c.windowActive, prometheus.GaugeValue, windowActive)
+
+	tick := c.worker.LastTickAt()
+	tickTs := 0.0
+	if !tick.IsZero() {
+		tickTs = float64(tick.Unix())
+	}
+	ch <- prometheus.MustNewConstMetric(c.lastTick, prometheus.GaugeValue, tickTs)
+
+	hb := 0.0
+	if !strings.HasPrefix(handbrake.VersionString(), "(HandBrakeCLI not found)") {
+		hb = 1.0
+	}
+	ch <- prometheus.MustNewConstMetric(c.hbAvail, prometheus.GaugeValue, hb)
+
+	for _, p := range c.worker.AllProgress() {
+		id := strconv.FormatInt(p.JobID, 10)
+		ch <- prometheus.MustNewConstMetric(c.encodePct, prometheus.GaugeValue, p.Percent, id)
+		ch <- prometheus.MustNewConstMetric(c.encodeFps, prometheus.GaugeValue, p.FPS, id)
+	}
+}
