@@ -505,26 +505,120 @@ func (w *Worker) encodeOne(encCtx, parentCtx context.Context, j store.JobRow) {
 		w.broadcast(ProgressEvent{JobID: j.ID, Title: j.Title, Percent: p.Percent, FPS: p.FPS, ETA: p.ETA})
 	}
 	cfg, _ := w.store.LoadAppSettings(parentCtx)
-	result, err := handbrake.Run(encCtx, j.FilePath, handbrake.Settings{
-		Encoder:         profile.Encoder,
-		EncoderPreset:   profile.EncoderPreset,
-		EncoderProfile:  profile.EncoderProfile,
-		EncoderTune:     profile.EncoderTune,
-		EncoderLevel:    profile.EncoderLevel,
-		Quality:         profile.Quality,
-		MaxWidth:        profile.MaxWidth,
-		MaxHeight:       profile.MaxHeight,
-		AudioEncoder:    profile.AudioEncoder,
-		AudioBitrate:    profile.AudioBitrate,
-		AudioMixdown:    profile.AudioMixdown,
-		SubtitleCopy:    profile.SubtitleCopy,
-		TwoPass:         profile.TwoPass,
-		ContainerFormat: profile.ContainerFormat,
-		ExtraArgs:       profile.ExtraArgs,
-		Framerate:       profile.Framerate,
-	}, onProgress)
-	if err != nil {
-		msg := err.Error()
+
+	// Size-guard policy decides whether to defer the file commit. When 'off'
+	// (default), handbrake.Run renames over the source as soon as the encode
+	// succeeds — same behavior as before this feature existed. Otherwise we
+	// run with NoCommit so we can compare new vs. original and decide whether
+	// to keep the encode, retry, or discard it.
+	guard := profile.BloatPolicy
+	if guard != "keep_original" && guard != "retry_higher_crf" {
+		guard = "off"
+	}
+	noCommit := guard != "off"
+
+	// Track retries (only meaningful for retry_higher_crf). currentQuality
+	// starts at the profile's RF and bumps by BloatRetryStep on each retry.
+	currentQuality := profile.Quality
+	maxRetries := 0
+	step := 0
+	if guard == "retry_higher_crf" {
+		maxRetries = profile.BloatRetryMax
+		step = profile.BloatRetryStep
+		if step <= 0 {
+			step = 3
+		}
+	}
+	combinedLog := strings.Builder{}
+	attempt := 0
+
+	var lastResult handbrake.RunResult
+	var lastErr error
+	for {
+		attempt++
+		if attempt > 1 {
+			fmt.Fprintf(&combinedLog, "\n--- retry %d (CRF %d) ---\n", attempt-1, currentQuality)
+			slog.Info("size-guard retry", "id", j.ID, "attempt", attempt, "quality", currentQuality)
+		}
+		lastResult, lastErr = handbrake.Run(encCtx, j.FilePath, handbrake.Settings{
+			Encoder:         profile.Encoder,
+			EncoderPreset:   profile.EncoderPreset,
+			EncoderProfile:  profile.EncoderProfile,
+			EncoderTune:     profile.EncoderTune,
+			EncoderLevel:    profile.EncoderLevel,
+			Quality:         currentQuality,
+			MaxWidth:        profile.MaxWidth,
+			MaxHeight:       profile.MaxHeight,
+			AudioEncoder:    profile.AudioEncoder,
+			AudioBitrate:    profile.AudioBitrate,
+			AudioMixdown:    profile.AudioMixdown,
+			SubtitleCopy:    profile.SubtitleCopy,
+			TwoPass:         profile.TwoPass,
+			ContainerFormat: profile.ContainerFormat,
+			ExtraArgs:       profile.ExtraArgs,
+			Framerate:       profile.Framerate,
+			NoCommit:        noCommit,
+		}, onProgress)
+		combinedLog.WriteString(lastResult.Log)
+
+		if lastErr != nil {
+			break
+		}
+		if guard == "off" {
+			// handbrake.Run already committed the rename. Done.
+			break
+		}
+
+		// Size guard: compare new vs. original and decide.
+		threshold := j.FileSize
+		if profile.BloatMinSavingsPercent > 0 && j.FileSize > 0 {
+			// Required final size to count as "not bloated":
+			//   final ≤ original × (1 − savings/100)
+			threshold = j.FileSize - (j.FileSize*int64(profile.BloatMinSavingsPercent))/100
+		}
+		if lastResult.FinalSize <= threshold {
+			// Acceptable size — commit and move on.
+			if err := handbrake.Commit(lastResult.TempPath, j.FilePath); err != nil {
+				lastErr = err
+				break
+			}
+			break
+		}
+
+		// New file is at-or-larger than the threshold. Always discard the
+		// uncommitted temp.
+		handbrake.DiscardTemp(lastResult.TempPath)
+
+		if guard == "retry_higher_crf" && attempt <= maxRetries {
+			currentQuality += step
+			continue
+		}
+
+		// Either policy is keep_original, or retries exhausted — keep the
+		// source file (already untouched on disk) and mark the job as
+		// skipped with an explanatory reason. Not a failure: encode worked,
+		// we just chose not to keep it.
+		reason := fmt.Sprintf(
+			"encode produced larger file (%s vs original %s) — kept original",
+			formatBytes(lastResult.FinalSize), formatBytes(j.FileSize),
+		)
+		if guard == "retry_higher_crf" {
+			reason = fmt.Sprintf(
+				"encode produced larger file after %d retries (final %s vs original %s) — kept original",
+				attempt-1, formatBytes(lastResult.FinalSize), formatBytes(j.FileSize),
+			)
+		}
+		if err := w.store.MarkJobSkipped(parentCtx, j.ID, reason); err != nil {
+			slog.Error("mark skipped (size guard)", "id", j.ID, "err", err)
+		}
+		slog.Info("size guard kept original", "id", j.ID, "title", j.Title,
+			"original", j.FileSize, "encoded", lastResult.FinalSize, "attempts", attempt)
+		go notify.Send(context.Background(), w.store, j.Title, "skipped", j.FilePath, j.FileSize, 0)
+		return
+	}
+
+	if lastErr != nil {
+		msg := lastErr.Error()
 		if encCtx.Err() != nil {
 			msg = "cancelled"
 		}
@@ -545,14 +639,18 @@ func (w *Worker) encodeOne(encCtx, parentCtx context.Context, j store.JobRow) {
 			}
 			return
 		}
-		encLog := truncateLog(result.Log, 200)
+		// Also discard any leftover temp from a guarded run that errored.
+		if lastResult.TempPath != "" {
+			handbrake.DiscardTemp(lastResult.TempPath)
+		}
+		encLog := truncateLog(combinedLog.String(), 200)
 		_ = w.store.MarkJobFailed(parentCtx, j.ID, msg, encLog)
 		slog.Error("encode failed", "id", j.ID, "err", msg)
 		go notify.Send(context.Background(), w.store, j.Title, "failed", j.FilePath, j.FileSize, 0)
 		return
 	}
 
-	if err := w.store.MarkJobDone(parentCtx, j.ID, result.FinalSize); err != nil {
+	if err := w.store.MarkJobDone(parentCtx, j.ID, lastResult.FinalSize); err != nil {
 		slog.Error("mark done", "id", j.ID, "err", err)
 		return
 	}
@@ -561,12 +659,12 @@ func (w *Worker) encodeOne(encCtx, parentCtx context.Context, j store.JobRow) {
 	// been processed without consulting the DB. Failure here doesn't fail the
 	// encode — the marker is an optimization, not a contract.
 	if cfg.OutputSuffixEnabled {
-		if err := writeSidecar(j.FilePath, cfg.OutputSuffix, j, profile, result.FinalSize); err != nil {
+		if err := writeSidecar(j.FilePath, cfg.OutputSuffix, j, profile, lastResult.FinalSize); err != nil {
 			slog.Warn("sidecar write failed", "id", j.ID, "err", err)
 		}
 	}
-	slog.Info("encode done", "id", j.ID, "path", j.FilePath, "originalSize", j.FileSize, "finalSize", result.FinalSize)
-	go notify.Send(context.Background(), w.store, j.Title, "done", j.FilePath, j.FileSize, result.FinalSize)
+	slog.Info("encode done", "id", j.ID, "path", j.FilePath, "originalSize", j.FileSize, "finalSize", lastResult.FinalSize, "attempts", attempt)
+	go notify.Send(context.Background(), w.store, j.Title, "done", j.FilePath, j.FileSize, lastResult.FinalSize)
 
 	w.refreshArr(parentCtx, j)
 }

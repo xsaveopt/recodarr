@@ -83,6 +83,16 @@ func (s *Store) migrate() error {
 			skip_duration_minutes INTEGER NOT NULL DEFAULT 0, -- skip if source ≤ this minutes long
 			skip_height_px INTEGER NOT NULL DEFAULT 0,    -- skip if source video height ≤ this
 			skip_hdr INTEGER NOT NULL DEFAULT 0,          -- skip if source has HDR transfer (PQ or HLG)
+			-- Post-encode size guard. 'off' = always commit; 'keep_original' = discard
+			-- the new file when it didn't shrink enough; 'retry_higher_crf' = re-encode
+			-- with quality + retry_step, up to retry_max times, then fall back to keep_original.
+			bloat_policy TEXT NOT NULL DEFAULT 'off',
+			bloat_retry_max INTEGER NOT NULL DEFAULT 3,
+			bloat_retry_step INTEGER NOT NULL DEFAULT 3,
+			-- Minimum savings (% of original) required to keep a re-encode. 0 = keep
+			-- anything ≤ original. 5 = require at least 5% smaller. Applied to every
+			-- attempt under both keep_original and retry_higher_crf policies.
+			bloat_min_savings_percent INTEGER NOT NULL DEFAULT 0,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE TABLE IF NOT EXISTS tag_mappings (

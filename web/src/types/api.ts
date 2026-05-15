@@ -47,6 +47,11 @@ export interface Profile {
   skipDurationMinutes: number;
   skipHeightPx: number;
   skipHDR: boolean;
+  // Post-encode size guard.
+  bloatPolicy: "off" | "keep_original" | "retry_higher_crf";
+  bloatRetryMax: number;
+  bloatRetryStep: number;
+  bloatMinSavingsPercent: number;
 }
 
 export interface TagMapping {

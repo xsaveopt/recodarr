@@ -69,6 +69,10 @@ type Settings struct {
 	ContainerFormat string // mkv (default) or mp4
 	ExtraArgs       string // raw HandBrakeCLI flags appended verbatim
 	Framerate       string // e.g. "30", "24000/1001"; empty = source
+	NoCommit        bool   // when true, the encoded file is left at TempPath instead of
+	// being renamed over the input. Callers use Commit or DiscardTemp to finalize. Used by
+	// the worker's size-guard policies, which want to compare new vs. original before
+	// destroying the source.
 }
 
 // Progress is a single progress observation parsed from HandBrakeCLI's stdout.
@@ -108,7 +112,9 @@ func parseProgressLine(line string) (Progress, bool) {
 // RunResult holds the outcome of a successful encode.
 type RunResult struct {
 	FinalSize int64
-	Log       string // captured combined output (always populated)
+	TempPath  string // populated when Settings.NoCommit was true; the encoded file's
+	// uncommitted location. Caller must Commit it or DiscardTemp it.
+	Log string // captured combined output (always populated)
 }
 
 // Run encodes input to a temp file in the same directory and atomically renames over input on success.
@@ -178,11 +184,34 @@ func Run(ctx context.Context, input string, s Settings, onProgress func(Progress
 	if err != nil {
 		return RunResult{Log: buf.String()}, fmt.Errorf("stat tmp: %w", err)
 	}
+	if s.NoCommit {
+		// Leave the temp file in place; caller decides what to do with it.
+		return RunResult{FinalSize: stat.Size(), TempPath: tmp, Log: buf.String()}, nil
+	}
 	if err := os.Rename(tmp, input); err != nil {
 		_ = os.Remove(tmp)
 		return RunResult{Log: buf.String()}, fmt.Errorf("rename: %w", err)
 	}
 	return RunResult{FinalSize: stat.Size(), Log: buf.String()}, nil
+}
+
+// Commit atomically renames a temp file produced with Settings.NoCommit over the
+// original input path. Use this once the caller has decided the encode is good
+// to keep. On the same filesystem (which the temp always is — same dir as input),
+// rename is atomic.
+func Commit(tempPath, finalPath string) error {
+	if err := os.Rename(tempPath, finalPath); err != nil {
+		_ = os.Remove(tempPath)
+		return fmt.Errorf("commit rename: %w", err)
+	}
+	return nil
+}
+
+// DiscardTemp removes a temp file produced with Settings.NoCommit. Errors are
+// swallowed because there's nothing useful the caller can do with them — the
+// encode already succeeded, this is just cleanup of a file we chose not to keep.
+func DiscardTemp(tempPath string) {
+	_ = os.Remove(tempPath)
 }
 
 // splitOnCRorLF is a bufio.SplitFunc that breaks on \r or \n so we capture HandBrake's

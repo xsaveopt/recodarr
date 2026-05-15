@@ -100,6 +100,11 @@ type profileDTO struct {
 	SkipDurationMinutes  int    `json:"skipDurationMinutes"`
 	SkipHeightPx         int    `json:"skipHeightPx"`
 	SkipHDR              bool   `json:"skipHDR"`
+	// Post-encode size guard.
+	BloatPolicy            string `json:"bloatPolicy"`
+	BloatRetryMax          int    `json:"bloatRetryMax"`
+	BloatRetryStep         int    `json:"bloatRetryStep"`
+	BloatMinSavingsPercent int    `json:"bloatMinSavingsPercent"`
 }
 
 func profileRowToDTO(r store.ProfileRow) profileDTO {
@@ -113,12 +118,16 @@ func profileRowToDTO(r store.ProfileRow) profileDTO {
 		SubtitleCopy: r.SubtitleCopy, TwoPass: r.TwoPass,
 		ContainerFormat: r.ContainerFormat, ExtraArgs: r.ExtraArgs,
 		Framerate: r.Framerate,
-		SkipCodecs:           r.SkipCodecs,
-		SkipBitrateMBPerHour: r.SkipBitrateMBPerHour,
-		SkipFileSizeMB:       r.SkipFileSizeMB,
-		SkipDurationMinutes:  r.SkipDurationMinutes,
-		SkipHeightPx:         r.SkipHeightPx,
-		SkipHDR:              r.SkipHDR,
+		SkipCodecs:             r.SkipCodecs,
+		SkipBitrateMBPerHour:   r.SkipBitrateMBPerHour,
+		SkipFileSizeMB:         r.SkipFileSizeMB,
+		SkipDurationMinutes:    r.SkipDurationMinutes,
+		SkipHeightPx:           r.SkipHeightPx,
+		SkipHDR:                r.SkipHDR,
+		BloatPolicy:            r.BloatPolicy,
+		BloatRetryMax:          r.BloatRetryMax,
+		BloatRetryStep:         r.BloatRetryStep,
+		BloatMinSavingsPercent: r.BloatMinSavingsPercent,
 	}
 }
 
@@ -283,6 +292,32 @@ func putSettings(st *store.Store) http.HandlerFunc {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}
+}
+
+// normalizeBloatPolicy gates the small enum we accept on profile writes. Any
+// unknown value collapses to "off" so we don't store junk in the DB and so an
+// older client sending a value we removed in a future version stays harmless.
+func normalizeBloatPolicy(s string) string {
+	switch s {
+	case "keep_original", "retry_higher_crf":
+		return s
+	default:
+		return "off"
+	}
+}
+
+// clamp keeps a numeric setting inside a sensible range without rejecting the
+// whole request. Out-of-range values get pulled to the nearest bound rather
+// than triggering a 400; the user usually meant "as much / as little as
+// possible" anyway.
+func clamp(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 // isValidOutputSuffix gates the output_suffix setting. We're strict on purpose:
@@ -613,12 +648,16 @@ func upsertProfile(st *store.Store) http.HandlerFunc {
 			SubtitleCopy: d.SubtitleCopy, TwoPass: d.TwoPass,
 			ContainerFormat: d.ContainerFormat, ExtraArgs: d.ExtraArgs,
 			Framerate:            d.Framerate,
-			SkipCodecs:           strings.ToLower(strings.TrimSpace(d.SkipCodecs)),
-			SkipBitrateMBPerHour: d.SkipBitrateMBPerHour,
-			SkipFileSizeMB:       d.SkipFileSizeMB,
-			SkipDurationMinutes:  d.SkipDurationMinutes,
-			SkipHeightPx:         d.SkipHeightPx,
-			SkipHDR:              d.SkipHDR,
+			SkipCodecs:             strings.ToLower(strings.TrimSpace(d.SkipCodecs)),
+			SkipBitrateMBPerHour:   d.SkipBitrateMBPerHour,
+			SkipFileSizeMB:         d.SkipFileSizeMB,
+			SkipDurationMinutes:    d.SkipDurationMinutes,
+			SkipHeightPx:           d.SkipHeightPx,
+			SkipHDR:                d.SkipHDR,
+			BloatPolicy:            normalizeBloatPolicy(d.BloatPolicy),
+			BloatRetryMax:          clamp(d.BloatRetryMax, 0, 10),
+			BloatRetryStep:         clamp(d.BloatRetryStep, 1, 20),
+			BloatMinSavingsPercent: clamp(d.BloatMinSavingsPercent, 0, 50),
 		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)

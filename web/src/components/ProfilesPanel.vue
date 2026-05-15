@@ -127,8 +127,18 @@ function defaultProfile(): Partial<Profile> {
     skipDurationMinutes: 0,
     skipHeightPx: 0,
     skipHDR: false,
+    bloatPolicy: "off",
+    bloatRetryMax: 3,
+    bloatRetryStep: 3,
+    bloatMinSavingsPercent: 0,
   };
 }
+
+const bloatPolicyOptions = [
+  { value: "off", label: "Off — always keep encoded file" },
+  { value: "keep_original", label: "Keep original if encode is larger" },
+  { value: "retry_higher_crf", label: "Retry with higher CRF, then keep original" },
+];
 
 function startCreate() {
   validationError.value = null;
@@ -412,6 +422,83 @@ onMounted(load);
               </label>
             </div>
             <p class="muted hint">Appended verbatim to the HandBrakeCLI command. Use with care.</p>
+          </section>
+
+          <!-- SIZE GUARD — post-encode policy -->
+          <section class="block block-full">
+            <div class="block-title-row">
+              <h3 class="block-title">Size guard</h3>
+              <span class="muted hint">
+                What to do when the encode produces a file that didn't shrink. Useful when
+                re-encoding already-efficient sources where a hardware encoder may bloat the file.
+              </span>
+            </div>
+            <div class="filter-grid">
+              <label class="field field-wide">
+                <span>Policy</span>
+                <Select
+                  v-model="editing.bloatPolicy"
+                  :options="bloatPolicyOptions"
+                  optionLabel="label"
+                  optionValue="value"
+                />
+              </label>
+              <label class="field">
+                <span>Min savings required</span>
+                <InputNumber
+                  v-model="editing.bloatMinSavingsPercent"
+                  :min="0"
+                  :max="50"
+                  :step="1"
+                  suffix=" %"
+                  placeholder="0"
+                  :disabled="editing.bloatPolicy === 'off'"
+                />
+              </label>
+              <label class="field">
+                <span>Retry max</span>
+                <InputNumber
+                  v-model="editing.bloatRetryMax"
+                  :min="0"
+                  :max="10"
+                  :step="1"
+                  suffix=" tries"
+                  :disabled="editing.bloatPolicy !== 'retry_higher_crf'"
+                />
+              </label>
+              <label class="field">
+                <span>Retry step</span>
+                <InputNumber
+                  v-model="editing.bloatRetryStep"
+                  :min="1"
+                  :max="20"
+                  :step="1"
+                  suffix=" CRF"
+                  :disabled="editing.bloatPolicy !== 'retry_higher_crf'"
+                />
+              </label>
+            </div>
+            <p class="muted hint span-2">
+              <strong v-if="editing.bloatPolicy === 'off'">Off:</strong>
+              <strong v-else-if="editing.bloatPolicy === 'keep_original'">Keep original:</strong>
+              <strong v-else>Retry:</strong>
+              <span v-if="editing.bloatPolicy === 'off'">
+                The encoded file always replaces the source, even if it grew. Same as before this
+                feature existed.
+              </span>
+              <span v-else-if="editing.bloatPolicy === 'keep_original'">
+                After every encode the new file's size is compared to the original. If it's not at
+                least <code>{{ editing.bloatMinSavingsPercent || 0 }}%</code> smaller, the new
+                file is discarded and the source is kept untouched. The job is marked
+                <code>skipped</code> with the size info in its reason.
+              </span>
+              <span v-else>
+                Same compare as Keep original, but if the encode is too big we retry with
+                <code>CRF + {{ editing.bloatRetryStep }}</code> up to
+                <code>{{ editing.bloatRetryMax }}</code> times before giving up and keeping the
+                source. Each retry is a full encode — set Retry max with that in mind.
+              </span>
+            </p>
           </section>
 
           <!-- PRE-ENCODE FILTERS — full-width, denser grid -->
