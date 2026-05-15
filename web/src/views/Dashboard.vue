@@ -49,6 +49,27 @@ const queuedJobs = computed(() =>
   recentJobs.value.filter((j) => j.status === "ready" || j.status === "waiting_for_seed"),
 );
 
+async function togglePause() {
+  if (!workerStatus.value) return;
+  const next = !workerStatus.value.paused;
+  const res = await notify.tryRun(
+    () => api.worker.setPaused(next),
+    next ? "Couldn't pause" : "Couldn't resume",
+  );
+  if (res !== undefined) {
+    if (next) {
+      notify.success(
+        res.cancelled > 0
+          ? `Encoding paused — ${res.cancelled} in-flight encode(s) re-queued`
+          : "Encoding paused",
+      );
+    } else {
+      notify.success("Encoding resumed");
+    }
+    await load();
+  }
+}
+
 async function load() {
   const res = await notify.tryRun(
     () => Promise.all([api.stats.get(), api.jobs.list(), api.worker.status()]),
@@ -110,13 +131,30 @@ onUnmounted(() => {
   <div class="dash">
     <!-- Status strip: worker + window -->
     <div v-if="workerStatus" class="status-strip">
-      <span class="dot" :class="workerStatus.isEncoding ? 'dot-active' : 'dot-idle'"></span>
+      <span
+        class="dot"
+        :class="
+          workerStatus.paused ? 'dot-paused' : workerStatus.isEncoding ? 'dot-active' : 'dot-idle'
+        "
+      ></span>
       <span class="strip-text">
-        <strong>{{ workerStatus.isEncoding ? "Encoding" : "Idle" }}</strong>
-        <span v-if="workerStatus.isEncoding" class="muted">
+        <strong>{{
+          workerStatus.paused ? "Paused" : workerStatus.isEncoding ? "Encoding" : "Idle"
+        }}</strong>
+        <span v-if="!workerStatus.paused && workerStatus.isEncoding" class="muted">
           · {{ workerStatus.encodingJobIds.length }} of {{ workerStatus.maxParallelEncodes }} slots
         </span>
+        <span v-else-if="workerStatus.paused" class="muted">· jobs continue to queue</span>
       </span>
+      <button
+        class="pause-btn"
+        type="button"
+        :title="workerStatus.paused ? 'Resume encoding' : 'Pause encoding'"
+        @click="togglePause"
+      >
+        <i class="pi" :class="workerStatus.paused ? 'pi-play' : 'pi-pause'"></i>
+        {{ workerStatus.paused ? "Resume" : "Pause" }}
+      </button>
       <span
         v-if="workerStatus.window?.hasLimit"
         class="strip-pill"
@@ -263,6 +301,35 @@ onUnmounted(() => {
 }
 .dot-idle {
   background: var(--rc-faint);
+}
+.dot-paused {
+  background: var(--rc-warn);
+}
+.pause-btn {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid var(--rc-border);
+  color: var(--rc-fg-2);
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: var(--rc-r-sm);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  transition:
+    background 0.08s ease,
+    border-color 0.08s ease,
+    color 0.08s ease;
+}
+.pause-btn:hover {
+  background: var(--rc-surface-2);
+  border-color: var(--rc-border-strong);
+  color: var(--rc-fg);
+}
+.pause-btn .pi {
+  font-size: 0.72rem;
 }
 .dot-active {
   background: var(--rc-ok);

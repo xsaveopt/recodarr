@@ -519,6 +519,18 @@ func (s *Store) MarkJobEncoding(ctx context.Context, id int64) (bool, error) {
 	return n > 0, err
 }
 
+// RequeueEncoding moves a job from encoding back to ready and rolls back the
+// attempts counter that MarkJobEncoding incremented. Used when a running encode
+// is cancelled by the worker for an external reason (pause, shutdown) — the job
+// shouldn't be penalized in the retry budget for a cancellation it didn't cause.
+func (s *Store) RequeueEncoding(ctx context.Context, id int64) error {
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE jobs SET status='ready', started_at=NULL, original_size=NULL,
+		 attempts = MAX(attempts - 1, 0), updated_at = CURRENT_TIMESTAMP
+		 WHERE id=? AND status='encoding'`, id)
+	return err
+}
+
 // SetRefreshError records why the post-encode *arr refresh failed (or clears it).
 func (s *Store) SetRefreshError(ctx context.Context, id int64, msg string) error {
 	_, err := s.DB.ExecContext(ctx,

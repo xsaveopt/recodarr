@@ -68,13 +68,20 @@ type Worker struct {
 	encoding    map[int64]*activeEncode // jobID → in-flight encode state
 	lastTickAt  time.Time
 	subscribers map[chan ProgressEvent]struct{}
+	// requeueOnCancel marks job ids whose in-flight encode should be re-queued
+	// (back to ready) instead of marked failed when the per-job context is
+	// cancelled. Used by the pause path so a paused mid-encode job isn't
+	// penalized in the retry budget. Entries are consumed by encodeOne's
+	// cancellation branch.
+	requeueOnCancel map[int64]struct{}
 }
 
 func NewWorker(s *store.Store) *Worker {
 	return &Worker{
-		store:       s,
-		encoding:    make(map[int64]*activeEncode),
-		subscribers: make(map[chan ProgressEvent]struct{}),
+		store:           s,
+		encoding:        make(map[int64]*activeEncode),
+		subscribers:     make(map[chan ProgressEvent]struct{}),
+		requeueOnCancel: make(map[int64]struct{}),
 	}
 }
 
@@ -212,6 +219,48 @@ type WindowStatus struct {
 	HasLimit bool   `json:"hasLimit"`
 }
 
+// SetPaused persists the master encoding-paused flag and, when transitioning
+// to paused, immediately cancels every in-flight encode and re-queues them
+// (status encoding → ready, attempts decremented). The settings PUT handler
+// also writes encoding_paused, but it goes through this method when it wants
+// the cancellation side-effect.
+//
+// Returns the number of encodes that were cancelled by this call (0 if the
+// flag didn't change to paused, or no encodes were running).
+func (w *Worker) SetPaused(ctx context.Context, paused bool) (int, error) {
+	val := "false"
+	if paused {
+		val = "true"
+	}
+	if err := w.store.SetSetting(ctx, "encoding_paused", val); err != nil {
+		return 0, err
+	}
+	if !paused {
+		return 0, nil
+	}
+
+	w.mu.Lock()
+	ids := make([]int64, 0, len(w.encoding))
+	for id, ae := range w.encoding {
+		w.requeueOnCancel[id] = struct{}{}
+		ae.cancel()
+		ids = append(ids, id)
+	}
+	w.mu.Unlock()
+
+	if len(ids) > 0 {
+		slog.Info("encoding paused; cancelled in-flight encodes", "count", len(ids), "ids", ids)
+	}
+	return len(ids), nil
+}
+
+// IsPaused reports the current value of the encoding_paused setting. Cheap
+// (single SQLite read); the worker also re-checks this on each tick.
+func (w *Worker) IsPaused(ctx context.Context) bool {
+	cfg, _ := w.store.LoadAppSettings(ctx)
+	return cfg.EncodingPaused
+}
+
 func (w *Worker) WindowStatus(ctx context.Context) WindowStatus {
 	cfg, _ := w.store.LoadAppSettings(ctx)
 	if cfg.EncodingWindowStart == "" || cfg.EncodingWindowEnd == "" {
@@ -343,11 +392,15 @@ func (w *Worker) transition(ctx context.Context, id int64, from, to, reason stri
 // launches each in its own goroutine. It does NOT wait for them — they run
 // independently and free their slot on completion.
 func (w *Worker) runEncodes(ctx context.Context) {
+	cfg, _ := w.store.LoadAppSettings(ctx)
+	if cfg.EncodingPaused {
+		slog.Debug("encoding paused, skipping encode")
+		return
+	}
 	if !w.inEncodingWindow(ctx) {
 		slog.Debug("outside encoding window, skipping encode")
 		return
 	}
-	cfg, _ := w.store.LoadAppSettings(ctx)
 	maxParallel := cfg.MaxParallelEncodes
 	if maxParallel < 1 {
 		maxParallel = 1
@@ -460,6 +513,23 @@ func (w *Worker) encodeOne(encCtx, parentCtx context.Context, j store.JobRow) {
 		msg := err.Error()
 		if encCtx.Err() != nil {
 			msg = "cancelled"
+		}
+		// Pause-initiated cancellations (and any other "external" cancel that
+		// pre-marked the job in requeueOnCancel) put the job back in the queue
+		// rather than failing it. The cancel wasn't its fault, and we want it
+		// to run later when encoding resumes. attempts is rolled back inside
+		// RequeueEncoding so this doesn't eat into the MaxJobAttempts budget.
+		w.mu.Lock()
+		_, requeue := w.requeueOnCancel[j.ID]
+		delete(w.requeueOnCancel, j.ID)
+		w.mu.Unlock()
+		if requeue && encCtx.Err() != nil {
+			if err := w.store.RequeueEncoding(parentCtx, j.ID); err != nil {
+				slog.Error("requeue after pause-cancel failed", "id", j.ID, "err", err)
+			} else {
+				slog.Info("requeued after pause-cancel", "id", j.ID)
+			}
+			return
 		}
 		encLog := truncateLog(result.Log, 200)
 		_ = w.store.MarkJobFailed(parentCtx, j.ID, msg, encLog)

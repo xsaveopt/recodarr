@@ -30,6 +30,8 @@ type workerClient interface {
 	CurrentProgress() job.ProgressEvent
 	AllProgress() []job.ProgressEvent
 	WindowStatus(ctx context.Context) job.WindowStatus
+	SetPaused(ctx context.Context, paused bool) (int, error)
+	IsPaused(ctx context.Context) bool
 }
 
 type arrInstanceDTO struct {
@@ -197,6 +199,7 @@ func registerAdminRoutes(r chi.Router, st *store.Store, w workerClient) {
 	})
 
 	r.Get("/worker/status", workerStatus(w, st))
+	r.Post("/worker/pause", workerSetPaused(w))
 
 	r.Get("/jobs", listJobs(st))
 	r.Post("/jobs/retry-failed", retryAllFailed(st))
@@ -240,6 +243,10 @@ func putSettings(st *store.Store) http.HandlerFunc {
 					http.StatusBadRequest)
 				return
 			}
+		}
+		if v, ok := m["encoding_paused"]; ok && v != "true" && v != "false" {
+			http.Error(w, "encoding_paused: expected 'true' or 'false'", http.StatusBadRequest)
+			return
 		}
 		for k, v := range m {
 			if err := st.SetSetting(r.Context(), k, v); err != nil {
@@ -754,6 +761,31 @@ func workerStatus(wk workerClient, st *store.Store) http.HandlerFunc {
 			"lastTickAt":         lastTick,
 			"window":             wk.WindowStatus(r.Context()),
 			"maxParallelEncodes": cfg.MaxParallelEncodes,
+			"paused":             cfg.EncodingPaused,
+		})
+	}
+}
+
+// workerSetPaused flips the master encoding-paused flag. When pausing, the
+// worker also cancels every in-flight encode and re-queues them. Body:
+// {"paused": true|false}. Response: {"paused": <bool>, "cancelled": <int>}.
+func workerSetPaused(wk workerClient) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Paused bool `json:"paused"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "bad payload", http.StatusBadRequest)
+			return
+		}
+		cancelled, err := wk.SetPaused(r.Context(), body.Paused)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"paused":    body.Paused,
+			"cancelled": cancelled,
 		})
 	}
 }

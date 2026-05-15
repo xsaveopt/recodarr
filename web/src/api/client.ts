@@ -101,6 +101,8 @@ export const api = {
   },
   worker: {
     status: () => request<WorkerStatus>("GET", "/worker/status"),
+    setPaused: (paused: boolean) =>
+      request<{ paused: boolean; cancelled: number }>("POST", "/worker/pause", { paused }),
   },
   auth: {
     status: () => request<AuthStatus>("GET", "/auth/status"),

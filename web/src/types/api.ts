@@ -115,6 +115,7 @@ export interface WorkerStatus {
   lastTickAt: string | null;
   window: WindowStatus;
   maxParallelEncodes: number; // configured concurrency limit
+  paused: boolean; // master encoding-paused switch
 }
 
 export interface ProgressEvent {

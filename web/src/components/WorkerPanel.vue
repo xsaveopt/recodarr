@@ -3,6 +3,7 @@ import { onMounted, ref } from "vue";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import InputNumber from "primevue/inputnumber";
+import ToggleSwitch from "primevue/toggleswitch";
 
 import { api } from "@/api/client";
 import { useNotify } from "@/composables/useNotify";
@@ -13,6 +14,7 @@ const intervalSeconds = ref<number>(30);
 const maxParallel = ref<number>(1);
 const windowStart = ref<string>("");
 const windowEnd = ref<string>("");
+const paused = ref<boolean>(false);
 
 async function load() {
   const s = await notify.tryRun(() => api.settings.get(), "Couldn't load settings");
@@ -21,6 +23,31 @@ async function load() {
     maxParallel.value = parseInt(s.max_parallel_encodes ?? "1") || 1;
     windowStart.value = s.encoding_window_start ?? "";
     windowEnd.value = s.encoding_window_end ?? "";
+    paused.value = s.encoding_paused === "true";
+  }
+}
+
+// The pause toggle calls the dedicated worker endpoint rather than the bulk
+// settings save, because pausing has a side-effect: it cancels and re-queues
+// any in-flight encodes immediately. The settings save path only writes the
+// flag — no cancellation.
+async function togglePause(next: boolean) {
+  const res = await notify.tryRun(
+    () => api.worker.setPaused(next),
+    next ? "Couldn't pause" : "Couldn't resume",
+  );
+  if (res === undefined) {
+    paused.value = !next; // revert UI on failure
+    return;
+  }
+  if (next) {
+    notify.success(
+      res.cancelled > 0
+        ? `Encoding paused — ${res.cancelled} in-flight encode(s) re-queued`
+        : "Encoding paused",
+    );
+  } else {
+    notify.success("Encoding resumed");
   }
 }
 
@@ -57,6 +84,23 @@ onMounted(load);
       Controls how frequently Recodarr checks for seed completion and starts encodes.
     </p>
     <div class="form">
+      <div class="section-title">Pause encoding</div>
+
+      <label class="pause-row">
+        <span>Pause</span>
+        <span class="pause-control">
+          <ToggleSwitch v-model="paused" @update:modelValue="togglePause" />
+          <span class="muted small">{{
+            paused ? "Worker is paused — jobs continue to queue" : "Worker is running"
+          }}</span>
+        </span>
+      </label>
+      <p class="muted small">
+        Master kill-switch. When turned on, any in-flight encode is cancelled and re-queued (no
+        attempt counted), and no new encodes will start until you turn it off again. Webhooks and
+        the queue keep working normally.
+      </p>
+
       <div class="section-title">Poll interval</div>
 
       <label>
@@ -152,5 +196,10 @@ onMounted(load);
 .actions {
   display: flex;
   gap: 0.5rem;
+}
+.pause-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
 }
 </style>

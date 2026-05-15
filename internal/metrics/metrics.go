@@ -78,6 +78,7 @@ type collector struct {
 	activeEnc    *prometheus.Desc
 	maxParallel  *prometheus.Desc
 	windowActive *prometheus.Desc
+	paused       *prometheus.Desc
 	lastTick     *prometheus.Desc
 	hbAvail      *prometheus.Desc
 	encodePct    *prometheus.Desc
@@ -114,6 +115,11 @@ func newCollector(st *store.Store, w *job.Worker) *collector {
 			"1 if the worker is inside its configured encoding window (or no window is set), 0 if outside.",
 			nil, nil,
 		),
+		paused: prometheus.NewDesc(
+			"recodarr_worker_paused",
+			"1 if the master encoding-paused switch is on, 0 otherwise. Jobs continue to queue while paused.",
+			nil, nil,
+		),
 		lastTick: prometheus.NewDesc(
 			"recodarr_worker_last_tick_timestamp_seconds",
 			"Unix timestamp of the worker's most recent tick. 0 if never ticked.",
@@ -143,6 +149,7 @@ func (c *collector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.activeEnc
 	ch <- c.maxParallel
 	ch <- c.windowActive
+	ch <- c.paused
 	ch <- c.lastTick
 	ch <- c.hbAvail
 	ch <- c.encodePct
@@ -166,6 +173,11 @@ func (c *collector) Collect(ch chan<- prometheus.Metric) {
 
 	if cfg, err := c.store.LoadAppSettings(ctx); err == nil {
 		ch <- prometheus.MustNewConstMetric(c.maxParallel, prometheus.GaugeValue, float64(cfg.MaxParallelEncodes))
+		paused := 0.0
+		if cfg.EncodingPaused {
+			paused = 1.0
+		}
+		ch <- prometheus.MustNewConstMetric(c.paused, prometheus.GaugeValue, paused)
 	}
 
 	ws := c.worker.WindowStatus(ctx)

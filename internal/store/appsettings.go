@@ -13,6 +13,7 @@ type AppSettings struct {
 	MaxParallelEncodes    int    // default 1; clamped to 1..16
 	EncodingWindowStart   string // "HH:MM" or "" (no window)
 	EncodingWindowEnd     string // "HH:MM" or ""
+	EncodingPaused        bool   // master kill-switch; jobs keep queueing but worker won't encode
 	NotifyURL             string
 	NotifyOnDone          bool // default true
 	NotifyOnFail          bool // default true
@@ -24,6 +25,7 @@ const (
 	keyMaxParallelEncodes    = "max_parallel_encodes"
 	keyEncodingWindowStart   = "encoding_window_start"
 	keyEncodingWindowEnd     = "encoding_window_end"
+	keyEncodingPaused        = "encoding_paused"
 	keyNotifyURL             = "notify_url"
 	keyNotifyOnDone          = "notify_on_done"
 	keyNotifyOnFail          = "notify_on_fail"
@@ -62,6 +64,7 @@ func (s *Store) LoadAppSettings(ctx context.Context) (AppSettings, error) {
 	}
 	cfg.EncodingWindowStart = all[keyEncodingWindowStart]
 	cfg.EncodingWindowEnd = all[keyEncodingWindowEnd]
+	cfg.EncodingPaused = all[keyEncodingPaused] == "true"
 	cfg.NotifyURL = all[keyNotifyURL]
 	if v, ok := all[keyNotifyOnDone]; ok {
 		cfg.NotifyOnDone = v == "true"
