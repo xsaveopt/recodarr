@@ -75,6 +75,14 @@ func (s *Store) migrate() error {
 			audio_encoder TEXT NOT NULL DEFAULT '',
 			audio_bitrate INTEGER NOT NULL DEFAULT 0,
 			audio_mixdown TEXT NOT NULL DEFAULT '',
+			-- Pre-encode filters. All zero / empty = filter inactive. See
+			-- internal/job/filters.go for evaluation order and semantics.
+			skip_codecs TEXT NOT NULL DEFAULT '',         -- comma-separated codec names to skip (e.g. "av1,hevc")
+			skip_bitrate_mb_per_hour INTEGER NOT NULL DEFAULT 0, -- skip if source ≤ this MB/hour
+			skip_file_size_mb INTEGER NOT NULL DEFAULT 0, -- skip if source file ≤ this MB
+			skip_duration_minutes INTEGER NOT NULL DEFAULT 0, -- skip if source ≤ this minutes long
+			skip_height_px INTEGER NOT NULL DEFAULT 0,    -- skip if source video height ≤ this
+			skip_hdr INTEGER NOT NULL DEFAULT 0,          -- skip if source has HDR transfer (PQ or HLG)
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE TABLE IF NOT EXISTS tag_mappings (

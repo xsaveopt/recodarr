@@ -40,6 +40,13 @@ export interface Profile {
   containerFormat: string;
   extraArgs: string;
   framerate: string;
+  // Pre-encode filters; zero/empty = inactive.
+  skipCodecs: string;
+  skipBitrateMBPerHour: number;
+  skipFileSizeMB: number;
+  skipDurationMinutes: number;
+  skipHeightPx: number;
+  skipHDR: boolean;
 }
 
 export interface TagMapping {
@@ -81,7 +88,13 @@ export interface DebugInfo {
   arch: string;
 }
 
-export type JobStatus = "waiting_for_seed" | "ready" | "encoding" | "done" | "failed";
+export type JobStatus =
+  | "waiting_for_seed"
+  | "ready"
+  | "encoding"
+  | "done"
+  | "failed"
+  | "skipped";
 
 export interface Job {
   id: number;
@@ -139,6 +152,7 @@ export interface JobStats {
   encoding: number;
   done: number;
   failed: number;
+  skipped: number;
   totalSavedBytes: number;
 }
 

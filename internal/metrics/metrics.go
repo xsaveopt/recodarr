@@ -166,6 +166,7 @@ func (c *collector) Collect(ch chan<- prometheus.Metric) {
 		ch <- prometheus.MustNewConstMetric(c.jobsByStatus, prometheus.GaugeValue, float64(stats.Encoding), "encoding")
 		ch <- prometheus.MustNewConstMetric(c.jobsByStatus, prometheus.GaugeValue, float64(stats.Done), "done")
 		ch <- prometheus.MustNewConstMetric(c.jobsByStatus, prometheus.GaugeValue, float64(stats.Failed), "failed")
+		ch <- prometheus.MustNewConstMetric(c.jobsByStatus, prometheus.GaugeValue, float64(stats.Skipped), "skipped")
 		ch <- prometheus.MustNewConstMetric(c.bytesSaved, prometheus.GaugeValue, float64(stats.TotalSavedBytes))
 	}
 

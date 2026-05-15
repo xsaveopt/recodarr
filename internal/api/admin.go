@@ -93,6 +93,13 @@ type profileDTO struct {
 	ContainerFormat string `json:"containerFormat"`
 	ExtraArgs       string `json:"extraArgs"`
 	Framerate       string `json:"framerate"`
+	// Pre-encode filters; zero/empty = inactive.
+	SkipCodecs           string `json:"skipCodecs"`
+	SkipBitrateMBPerHour int    `json:"skipBitrateMBPerHour"`
+	SkipFileSizeMB       int    `json:"skipFileSizeMB"`
+	SkipDurationMinutes  int    `json:"skipDurationMinutes"`
+	SkipHeightPx         int    `json:"skipHeightPx"`
+	SkipHDR              bool   `json:"skipHDR"`
 }
 
 func profileRowToDTO(r store.ProfileRow) profileDTO {
@@ -106,6 +113,12 @@ func profileRowToDTO(r store.ProfileRow) profileDTO {
 		SubtitleCopy: r.SubtitleCopy, TwoPass: r.TwoPass,
 		ContainerFormat: r.ContainerFormat, ExtraArgs: r.ExtraArgs,
 		Framerate: r.Framerate,
+		SkipCodecs:           r.SkipCodecs,
+		SkipBitrateMBPerHour: r.SkipBitrateMBPerHour,
+		SkipFileSizeMB:       r.SkipFileSizeMB,
+		SkipDurationMinutes:  r.SkipDurationMinutes,
+		SkipHeightPx:         r.SkipHeightPx,
+		SkipHDR:              r.SkipHDR,
 	}
 }
 
@@ -131,6 +144,7 @@ type statsDTO struct {
 	Encoding        int64 `json:"encoding"`
 	Done            int64 `json:"done"`
 	Failed          int64 `json:"failed"`
+	Skipped         int64 `json:"skipped"`
 	TotalSavedBytes int64 `json:"totalSavedBytes"`
 }
 
@@ -155,6 +169,7 @@ func registerAdminRoutes(r chi.Router, st *store.Store, w workerClient) {
 			Encoding:        stats.Encoding,
 			Done:            stats.Done,
 			Failed:          stats.Failed,
+			Skipped:         stats.Skipped,
 			TotalSavedBytes: stats.TotalSavedBytes,
 		})
 	})
@@ -597,7 +612,13 @@ func upsertProfile(st *store.Store) http.HandlerFunc {
 			AudioBitrate: d.AudioBitrate, AudioMixdown: d.AudioMixdown,
 			SubtitleCopy: d.SubtitleCopy, TwoPass: d.TwoPass,
 			ContainerFormat: d.ContainerFormat, ExtraArgs: d.ExtraArgs,
-			Framerate: d.Framerate,
+			Framerate:            d.Framerate,
+			SkipCodecs:           strings.ToLower(strings.TrimSpace(d.SkipCodecs)),
+			SkipBitrateMBPerHour: d.SkipBitrateMBPerHour,
+			SkipFileSizeMB:       d.SkipFileSizeMB,
+			SkipDurationMinutes:  d.SkipDurationMinutes,
+			SkipHeightPx:         d.SkipHeightPx,
+			SkipHDR:              d.SkipHDR,
 		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)

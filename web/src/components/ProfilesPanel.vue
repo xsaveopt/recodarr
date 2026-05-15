@@ -121,6 +121,12 @@ function defaultProfile(): Partial<Profile> {
     containerFormat: "mkv",
     extraArgs: "",
     framerate: "",
+    skipCodecs: "",
+    skipBitrateMBPerHour: 0,
+    skipFileSizeMB: 0,
+    skipDurationMinutes: 0,
+    skipHeightPx: 0,
+    skipHDR: false,
   };
 }
 
@@ -227,153 +233,260 @@ onMounted(load);
       @update:visible="(v) => (editing = v ? editing : null)"
       modal
       :header="editing?.id ? 'Edit profile' : 'New profile'"
-      :style="{ width: '34rem' }"
+      :style="{ width: '76rem' }"
+      :breakpoints="{ '1100px': '95vw' }"
+      class="profile-dialog"
     >
-      <div v-if="editing" class="form">
+      <div v-if="editing" class="editor">
         <div v-if="validationError" class="error">{{ validationError }}</div>
 
-        <label>
-          <span>Name</span>
-          <InputText v-model="editing.name" placeholder="HEVC 1080p" />
-        </label>
+        <!-- Top strip: name + a couple of headline knobs always in sight -->
+        <section class="block block-head">
+          <label class="field field-wide">
+            <span>Profile name</span>
+            <InputText v-model="editing.name" placeholder="HEVC 1080p" />
+          </label>
+          <label class="field">
+            <span>Container</span>
+            <Select
+              v-model="editing.containerFormat"
+              :options="containerOptions"
+              optionLabel="label"
+              optionValue="value"
+            />
+          </label>
+          <label class="field field-narrow">
+            <span>Quality (RF)</span>
+            <InputNumber v-model="editing.quality" :min="1" :max="51" showButtons />
+          </label>
+        </section>
 
-        <div class="section-title">Encoder</div>
+        <div class="grid">
+          <!-- VIDEO ENCODER -->
+          <section class="block">
+            <h3 class="block-title">Video encoder</h3>
+            <div class="fields">
+              <label class="field">
+                <span>Encoder</span>
+                <Select
+                  v-model="editing.encoder"
+                  :options="encoderOptions"
+                  optionLabel="label"
+                  optionValue="value"
+                  placeholder="Select encoder"
+                />
+              </label>
+              <label class="field">
+                <span>Preset</span>
+                <Select
+                  v-model="editing.encoderPreset"
+                  :options="[{ value: '', label: '— default —' }, ...presetOptions]"
+                  optionLabel="label"
+                  optionValue="value"
+                />
+              </label>
+              <label class="field">
+                <span>Profile</span>
+                <Select
+                  v-model="editing.encoderProfile"
+                  :options="[{ value: '', label: '— default —' }, ...profileOptions]"
+                  optionLabel="label"
+                  optionValue="value"
+                />
+              </label>
+              <label class="field">
+                <span>Tune</span>
+                <Select
+                  v-model="editing.encoderTune"
+                  :options="[{ value: '', label: '— none —' }, ...tuneOptions]"
+                  optionLabel="label"
+                  optionValue="value"
+                />
+              </label>
+              <label class="field">
+                <span>Level</span>
+                <Select
+                  v-model="editing.encoderLevel"
+                  :options="[{ value: '', label: '— auto —' }, ...levelOptions]"
+                  optionLabel="label"
+                  optionValue="value"
+                />
+              </label>
+              <label class="field field-toggle">
+                <span>Two-pass</span>
+                <span class="toggle-row">
+                  <ToggleSwitch v-model="editing.twoPass" />
+                  <span class="muted hint">Better quality/size ratio, ~2× encode time</span>
+                </span>
+              </label>
+            </div>
+          </section>
 
-        <label>
-          <span>Encoder</span>
-          <Select
-            v-model="editing.encoder"
-            :options="encoderOptions"
-            optionLabel="label"
-            optionValue="value"
-            placeholder="Select encoder"
-          />
-        </label>
-        <label>
-          <span>Preset</span>
-          <Select
-            v-model="editing.encoderPreset"
-            :options="[{ value: '', label: '— default —' }, ...presetOptions]"
-            optionLabel="label"
-            optionValue="value"
-          />
-        </label>
-        <label>
-          <span>Profile</span>
-          <Select
-            v-model="editing.encoderProfile"
-            :options="[{ value: '', label: '— default —' }, ...profileOptions]"
-            optionLabel="label"
-            optionValue="value"
-          />
-        </label>
-        <label>
-          <span>Tune</span>
-          <Select
-            v-model="editing.encoderTune"
-            :options="[{ value: '', label: '— none —' }, ...tuneOptions]"
-            optionLabel="label"
-            optionValue="value"
-          />
-        </label>
-        <label>
-          <span>Level</span>
-          <Select
-            v-model="editing.encoderLevel"
-            :options="[{ value: '', label: '— auto —' }, ...levelOptions]"
-            optionLabel="label"
-            optionValue="value"
-          />
-        </label>
-        <label>
-          <span>Quality (RF)</span>
-          <InputNumber v-model="editing.quality" :min="1" :max="51" showButtons />
-        </label>
+          <!-- VIDEO OUTPUT -->
+          <section class="block">
+            <h3 class="block-title">Video output</h3>
+            <div class="fields">
+              <label class="field">
+                <span>Max width</span>
+                <InputNumber
+                  v-model="editing.maxWidth"
+                  :min="0"
+                  placeholder="0 = no cap"
+                  suffix=" px"
+                />
+              </label>
+              <label class="field">
+                <span>Max height</span>
+                <InputNumber
+                  v-model="editing.maxHeight"
+                  :min="0"
+                  placeholder="0 = no cap"
+                  suffix=" px"
+                />
+              </label>
+              <label class="field">
+                <span>Framerate</span>
+                <InputText
+                  v-model="editing.framerate"
+                  placeholder="e.g. 30, 24000/1001 (empty = source)"
+                />
+              </label>
+            </div>
+          </section>
 
-        <div class="section-title">Resolution cap</div>
-        <p class="muted small">0 = no cap (keep original)</p>
+          <!-- AUDIO -->
+          <section class="block">
+            <h3 class="block-title">Audio</h3>
+            <div class="fields">
+              <label class="field">
+                <span>Encoder</span>
+                <Select
+                  v-model="editing.audioEncoder"
+                  :options="audioEncoderOptions"
+                  optionLabel="label"
+                  optionValue="value"
+                />
+              </label>
+              <label class="field">
+                <span>Bitrate</span>
+                <InputNumber
+                  v-model="editing.audioBitrate"
+                  :min="0"
+                  placeholder="0 = auto"
+                  suffix=" kbps"
+                />
+              </label>
+              <label class="field">
+                <span>Mixdown</span>
+                <Select
+                  v-model="editing.audioMixdown"
+                  :options="audioMixdownOptions"
+                  optionLabel="label"
+                  optionValue="value"
+                />
+              </label>
+              <label class="field field-toggle">
+                <span>Subtitles</span>
+                <span class="toggle-row">
+                  <ToggleSwitch v-model="editing.subtitleCopy" />
+                  <span class="muted hint">Copy all subtitle tracks</span>
+                </span>
+              </label>
+            </div>
+            <p class="muted hint span-2">
+              Empty encoder = copy all audio tracks (bitrate/mixdown ignored).
+            </p>
+          </section>
 
-        <label>
-          <span>Max width (px)</span>
-          <InputNumber v-model="editing.maxWidth" :min="0" placeholder="0" />
-        </label>
-        <label>
-          <span>Max height (px)</span>
-          <InputNumber v-model="editing.maxHeight" :min="0" placeholder="0" />
-        </label>
+          <!-- ADVANCED -->
+          <section class="block">
+            <h3 class="block-title">Advanced</h3>
+            <div class="fields">
+              <label class="field field-wide">
+                <span>Extra args</span>
+                <InputText
+                  v-model="editing.extraArgs"
+                  placeholder="--no-hwd-decode ..."
+                  class="mono"
+                />
+              </label>
+            </div>
+            <p class="muted hint">Appended verbatim to the HandBrakeCLI command. Use with care.</p>
+          </section>
 
-        <div class="section-title">Audio</div>
-
-        <label>
-          <span>Audio encoder</span>
-          <Select
-            v-model="editing.audioEncoder"
-            :options="audioEncoderOptions"
-            optionLabel="label"
-            optionValue="value"
-          />
-        </label>
-        <label>
-          <span>Audio bitrate (kbps)</span>
-          <InputNumber v-model="editing.audioBitrate" :min="0" placeholder="0 = auto" />
-        </label>
-        <label>
-          <span>Mixdown</span>
-          <Select
-            v-model="editing.audioMixdown"
-            :options="audioMixdownOptions"
-            optionLabel="label"
-            optionValue="value"
-          />
-        </label>
-        <p class="muted small">
-          Empty encoder = copy all tracks (bitrate/mixdown ignored). Selecting an encoder re-encodes
-          all audio tracks.
-        </p>
-
-        <label class="row">
-          <span>Copy all subtitles</span>
-          <ToggleSwitch v-model="editing.subtitleCopy" />
-        </label>
-
-        <div class="section-title">Encoding</div>
-
-        <label class="row">
-          <span>Two-pass encoding</span>
-          <ToggleSwitch v-model="editing.twoPass" />
-        </label>
-        <p class="muted small">Better quality/size ratio; roughly doubles encode time.</p>
-
-        <div class="section-title">Output</div>
-
-        <label>
-          <span>Container format</span>
-          <Select
-            v-model="editing.containerFormat"
-            :options="containerOptions"
-            optionLabel="label"
-            optionValue="value"
-          />
-        </label>
-        <label>
-          <span>Framerate</span>
-          <InputText
-            v-model="editing.framerate"
-            placeholder="e.g. 30, 24000/1001 (empty = source)"
-          />
-        </label>
-
-        <div class="section-title">Advanced</div>
-
-        <label>
-          <span>Extra HandBrake args</span>
-          <InputText v-model="editing.extraArgs" placeholder="--no-hwd-decode ..." class="mono" />
-        </label>
-        <p class="muted small">Appended verbatim to the HandBrakeCLI command. Use with care.</p>
+          <!-- PRE-ENCODE FILTERS — full-width, denser grid -->
+          <section class="block block-full">
+            <div class="block-title-row">
+              <h3 class="block-title">Pre-encode filters</h3>
+              <span class="muted hint">
+                Skip a job before encoding when its source matches any rule below. Marks the job as
+                <code>skipped</code> with the reason. Leave a field at <code>0</code> or blank to
+                disable. All checks except file size require <code>ffprobe</code>.
+              </span>
+            </div>
+            <div class="filter-grid">
+              <label class="field">
+                <span>Codec in</span>
+                <InputText
+                  v-model="editing.skipCodecs"
+                  placeholder="e.g. av1,hevc"
+                  class="mono"
+                />
+              </label>
+              <label class="field">
+                <span>Bitrate ≤</span>
+                <InputNumber
+                  v-model="editing.skipBitrateMBPerHour"
+                  :min="0"
+                  :step="100"
+                  suffix=" MB/h"
+                  placeholder="0"
+                />
+              </label>
+              <label class="field">
+                <span>File size ≤</span>
+                <InputNumber
+                  v-model="editing.skipFileSizeMB"
+                  :min="0"
+                  :step="50"
+                  suffix=" MB"
+                  placeholder="0"
+                />
+              </label>
+              <label class="field">
+                <span>Duration ≤</span>
+                <InputNumber
+                  v-model="editing.skipDurationMinutes"
+                  :min="0"
+                  :step="1"
+                  suffix=" min"
+                  placeholder="0"
+                />
+              </label>
+              <label class="field">
+                <span>Height ≤</span>
+                <InputNumber
+                  v-model="editing.skipHeightPx"
+                  :min="0"
+                  :step="120"
+                  suffix=" px"
+                  placeholder="0"
+                />
+              </label>
+              <label class="field field-toggle">
+                <span>HDR</span>
+                <span class="toggle-row">
+                  <ToggleSwitch v-model="editing.skipHDR" />
+                  <span class="muted hint">PQ / HLG sources</span>
+                </span>
+              </label>
+            </div>
+          </section>
+        </div>
       </div>
       <template #footer>
         <Button text label="Cancel" @click="editing = null" />
-        <Button label="Save" icon="pi pi-check" @click="save" />
+        <Button label="Save profile" icon="pi pi-check" @click="save" />
       </template>
     </Dialog>
   </div>
@@ -405,30 +518,152 @@ onMounted(load);
   padding: 0.5rem 0.75rem;
   border-radius: 4px;
 }
-.form {
+/* Power-user editor layout. Card per logical group, two-column at desktop,
+   one-column at narrower breakpoints (Dialog already drops to 95vw at <1100px). */
+.editor {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.85rem;
 }
-.form label {
+
+/* Top strip: name + container + quality always in sight */
+.block-head {
   display: grid;
-  grid-template-columns: 10rem 1fr;
-  align-items: center;
-  gap: 0.75rem;
+  grid-template-columns: 1.6fr 0.9fr 0.7fr;
+  gap: 0.85rem;
+  align-items: end;
 }
-.form label.row {
-  grid-template-columns: 10rem auto;
+
+/* The two-column card grid for the body. Most cards span one column;
+   .block-full spans both. */
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.85rem;
 }
-.section-title {
-  font-size: 0.75rem;
+.block-full {
+  grid-column: 1 / -1;
+}
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+  .block-head {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Card primitive */
+.block {
+  background: var(--rc-surface);
+  border: 1px solid var(--rc-border);
+  border-radius: var(--rc-r-md);
+  padding: 0.85rem 1rem 1rem;
+}
+.block-title {
+  margin: 0 0 0.65rem;
+  font-size: 0.72rem;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--app-muted);
-  margin-top: 0.25rem;
+  letter-spacing: 0.06em;
+  color: var(--rc-muted);
 }
+.block-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.85rem;
+  margin-bottom: 0.65rem;
+  flex-wrap: wrap;
+}
+.block-title-row .block-title {
+  margin: 0;
+  flex-shrink: 0;
+}
+.block-title-row .hint {
+  flex: 1;
+  min-width: 18rem;
+}
+
+/* Two-column field grid inside each card */
+.fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem 0.85rem;
+}
+.filter-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.6rem 0.85rem;
+}
+@media (max-width: 700px) {
+  .fields,
+  .filter-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* A single field: small uppercase label above its input */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+.field > span {
+  font-size: 0.72rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--rc-muted);
+}
+.field-wide {
+  grid-column: span 2;
+}
+.field-narrow :deep(.p-inputnumber-input) {
+  width: 5rem;
+}
+.field-toggle {
+  justify-content: flex-end;
+}
+
+/* Make every input fill its slot so the grid columns line up cleanly */
+.field :deep(.p-inputtext),
+.field :deep(.p-inputnumber),
+.field :deep(.p-inputnumber-input),
+.field :deep(.p-select) {
+  width: 100%;
+}
+
+.toggle-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 28px;
+}
+.hint {
+  font-size: 0.78rem;
+  color: var(--rc-muted);
+  margin: 0;
+  line-height: 1.4;
+}
+.hint code {
+  background: var(--rc-code-bg);
+  padding: 0.05rem 0.3rem;
+  border-radius: var(--rc-r-sm);
+  font-size: 0.78rem;
+}
+.span-2 {
+  margin-top: 0.5rem;
+}
+
 :deep(.mono input) {
-  font-family: monospace;
-  font-size: 0.85rem;
+  font-family: var(--rc-font-mono);
+  font-size: 0.82rem;
+}
+
+/* Reserve dialog content area so it scrolls cleanly on short viewports */
+:deep(.profile-dialog .p-dialog-content) {
+  max-height: 80vh;
+  overflow-y: auto;
 }
 </style>

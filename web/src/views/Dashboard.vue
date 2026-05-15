@@ -114,7 +114,12 @@ const isEmpty = computed(() => {
   const s = stats.value;
   if (!s) return false;
   return (
-    s.done === 0 && s.encoding === 0 && s.ready === 0 && s.waitingForSeed === 0 && s.failed === 0
+    s.done === 0 &&
+    s.encoding === 0 &&
+    s.ready === 0 &&
+    s.waitingForSeed === 0 &&
+    s.failed === 0 &&
+    s.skipped === 0
   );
 });
 
@@ -218,6 +223,10 @@ onUnmounted(() => {
         <div class="stat-value tnum" :class="{ 'stat-bad': stats.failed > 0 }">
           {{ stats.failed }}
         </div>
+      </RouterLink>
+      <RouterLink class="stat" :to="{ name: 'jobs', query: { status: 'skipped' } }">
+        <div class="stat-label">Skipped</div>
+        <div class="stat-value tnum">{{ stats.skipped }}</div>
       </RouterLink>
     </section>
 
@@ -565,6 +574,10 @@ a.stat:hover {
 }
 .marker-failed {
   background: var(--rc-danger);
+}
+.marker-skipped {
+  background: transparent;
+  border: 1.5px solid var(--rc-faint);
 }
 .row-title {
   flex: 1;

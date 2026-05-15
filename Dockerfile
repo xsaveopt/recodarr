@@ -97,6 +97,12 @@ RUN echo "deb http://deb.debian.org/debian trixie main contrib non-free non-free
         # Intel/AMD VAAPI + QSV runtime
         libva-drm2 libva2 libvpl2 vainfo \
         intel-media-va-driver \
+        # ffprobe for the per-profile pre-encode filters (codec detection,
+        # bitrate, HDR transfer, resolution). The full ffmpeg package would
+        # work but ships ~200 MB of codecs we don't use; ffmpeg-bin gives us
+        # just the binaries. If apt's split makes ffprobe-only impossible
+        # on this Debian release we fall back to the umbrella ffmpeg package.
+        ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=handbrake-builder /HandBrakeCLI /usr/local/bin/HandBrakeCLI

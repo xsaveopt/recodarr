@@ -48,6 +48,13 @@ type ProfileRow struct {
 	AudioEncoder    string
 	AudioBitrate    int
 	AudioMixdown    string
+	// Pre-encode filters; zero/empty = filter inactive.
+	SkipCodecs            string // comma-separated, lowercase, e.g. "av1,hevc"
+	SkipBitrateMBPerHour  int
+	SkipFileSizeMB        int
+	SkipDurationMinutes   int
+	SkipHeightPx          int
+	SkipHDR               bool
 }
 
 type TagMappingRow struct {
@@ -88,6 +95,7 @@ type JobStatsRow struct {
 	Encoding        int64
 	Done            int64
 	Failed          int64
+	Skipped         int64
 	TotalSavedBytes int64
 }
 
@@ -283,14 +291,16 @@ func (s *Store) DeleteQbitInstance(ctx context.Context, id int64) error {
 
 // --- profiles ---
 
-const profileCols = `id,name,encoder,encoder_preset,encoder_profile,encoder_tune,encoder_level,quality,max_width,max_height,subtitle_copy,two_pass,container_format,extra_args,framerate,audio_encoder,audio_bitrate,audio_mixdown`
+const profileCols = `id,name,encoder,encoder_preset,encoder_profile,encoder_tune,encoder_level,quality,max_width,max_height,subtitle_copy,two_pass,container_format,extra_args,framerate,audio_encoder,audio_bitrate,audio_mixdown,skip_codecs,skip_bitrate_mb_per_hour,skip_file_size_mb,skip_duration_minutes,skip_height_px,skip_hdr`
 
 func scanProfile(scan func(...any) error) (ProfileRow, error) {
 	var r ProfileRow
-	var subtitleCopy, twoPass int
-	err := scan(&r.ID, &r.Name, &r.Encoder, &r.EncoderPreset, &r.EncoderProfile, &r.EncoderTune, &r.EncoderLevel, &r.Quality, &r.MaxWidth, &r.MaxHeight, &subtitleCopy, &twoPass, &r.ContainerFormat, &r.ExtraArgs, &r.Framerate, &r.AudioEncoder, &r.AudioBitrate, &r.AudioMixdown)
+	var subtitleCopy, twoPass, skipHDR int
+	err := scan(&r.ID, &r.Name, &r.Encoder, &r.EncoderPreset, &r.EncoderProfile, &r.EncoderTune, &r.EncoderLevel, &r.Quality, &r.MaxWidth, &r.MaxHeight, &subtitleCopy, &twoPass, &r.ContainerFormat, &r.ExtraArgs, &r.Framerate, &r.AudioEncoder, &r.AudioBitrate, &r.AudioMixdown,
+		&r.SkipCodecs, &r.SkipBitrateMBPerHour, &r.SkipFileSizeMB, &r.SkipDurationMinutes, &r.SkipHeightPx, &skipHDR)
 	r.SubtitleCopy = subtitleCopy != 0
 	r.TwoPass = twoPass != 0
+	r.SkipHDR = skipHDR != 0
 	return r, err
 }
 
@@ -325,16 +335,20 @@ func (s *Store) GetProfile(ctx context.Context, id int64) (*ProfileRow, error) {
 func (s *Store) UpsertProfile(ctx context.Context, r ProfileRow) (int64, error) {
 	if r.ID == 0 {
 		res, err := s.DB.ExecContext(ctx,
-			`INSERT INTO profiles (name,encoder,encoder_preset,encoder_profile,encoder_tune,encoder_level,quality,max_width,max_height,subtitle_copy,two_pass,container_format,extra_args,framerate,audio_encoder,audio_bitrate,audio_mixdown) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			r.Name, r.Encoder, r.EncoderPreset, r.EncoderProfile, r.EncoderTune, r.EncoderLevel, r.Quality, r.MaxWidth, r.MaxHeight, boolToInt(r.SubtitleCopy), boolToInt(r.TwoPass), r.ContainerFormat, r.ExtraArgs, r.Framerate, r.AudioEncoder, r.AudioBitrate, r.AudioMixdown)
+			`INSERT INTO profiles (name,encoder,encoder_preset,encoder_profile,encoder_tune,encoder_level,quality,max_width,max_height,subtitle_copy,two_pass,container_format,extra_args,framerate,audio_encoder,audio_bitrate,audio_mixdown,skip_codecs,skip_bitrate_mb_per_hour,skip_file_size_mb,skip_duration_minutes,skip_height_px,skip_hdr)
+			 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			r.Name, r.Encoder, r.EncoderPreset, r.EncoderProfile, r.EncoderTune, r.EncoderLevel, r.Quality, r.MaxWidth, r.MaxHeight, boolToInt(r.SubtitleCopy), boolToInt(r.TwoPass), r.ContainerFormat, r.ExtraArgs, r.Framerate, r.AudioEncoder, r.AudioBitrate, r.AudioMixdown,
+			r.SkipCodecs, r.SkipBitrateMBPerHour, r.SkipFileSizeMB, r.SkipDurationMinutes, r.SkipHeightPx, boolToInt(r.SkipHDR))
 		if err != nil {
 			return 0, err
 		}
 		return res.LastInsertId()
 	}
 	_, err := s.DB.ExecContext(ctx,
-		`UPDATE profiles SET name=?,encoder=?,encoder_preset=?,encoder_profile=?,encoder_tune=?,encoder_level=?,quality=?,max_width=?,max_height=?,subtitle_copy=?,two_pass=?,container_format=?,extra_args=?,framerate=?,audio_encoder=?,audio_bitrate=?,audio_mixdown=? WHERE id=?`,
-		r.Name, r.Encoder, r.EncoderPreset, r.EncoderProfile, r.EncoderTune, r.EncoderLevel, r.Quality, r.MaxWidth, r.MaxHeight, boolToInt(r.SubtitleCopy), boolToInt(r.TwoPass), r.ContainerFormat, r.ExtraArgs, r.Framerate, r.AudioEncoder, r.AudioBitrate, r.AudioMixdown, r.ID)
+		`UPDATE profiles SET name=?,encoder=?,encoder_preset=?,encoder_profile=?,encoder_tune=?,encoder_level=?,quality=?,max_width=?,max_height=?,subtitle_copy=?,two_pass=?,container_format=?,extra_args=?,framerate=?,audio_encoder=?,audio_bitrate=?,audio_mixdown=?,
+		 skip_codecs=?,skip_bitrate_mb_per_hour=?,skip_file_size_mb=?,skip_duration_minutes=?,skip_height_px=?,skip_hdr=? WHERE id=?`,
+		r.Name, r.Encoder, r.EncoderPreset, r.EncoderProfile, r.EncoderTune, r.EncoderLevel, r.Quality, r.MaxWidth, r.MaxHeight, boolToInt(r.SubtitleCopy), boolToInt(r.TwoPass), r.ContainerFormat, r.ExtraArgs, r.Framerate, r.AudioEncoder, r.AudioBitrate, r.AudioMixdown,
+		r.SkipCodecs, r.SkipBitrateMBPerHour, r.SkipFileSizeMB, r.SkipDurationMinutes, r.SkipHeightPx, boolToInt(r.SkipHDR), r.ID)
 	return r.ID, err
 }
 
@@ -437,15 +451,16 @@ func (s *Store) GetJobStats(ctx context.Context) (JobStatsRow, error) {
 			COALESCE(SUM(CASE WHEN status='encoding' THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN status='done' THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status='skipped' THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN status='done' AND original_size IS NOT NULL AND final_size IS NOT NULL THEN original_size - final_size ELSE 0 END), 0)
-		FROM jobs`).Scan(&r.WaitingForSeed, &r.Ready, &r.Encoding, &r.Done, &r.Failed, &r.TotalSavedBytes)
+		FROM jobs`).Scan(&r.WaitingForSeed, &r.Ready, &r.Encoding, &r.Done, &r.Failed, &r.Skipped, &r.TotalSavedBytes)
 	return r, err
 }
 
 func (s *Store) HasActiveJob(ctx context.Context, arrKind string, arrInstanceID, arrItemID int64) (bool, error) {
 	var n int
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT COUNT(1) FROM jobs WHERE arr_kind=? AND arr_instance_id=? AND arr_item_id=? AND status NOT IN ('done','failed')`,
+		`SELECT COUNT(1) FROM jobs WHERE arr_kind=? AND arr_instance_id=? AND arr_item_id=? AND status NOT IN ('done','failed','skipped')`,
 		arrKind, arrInstanceID, arrItemID).Scan(&n)
 	return n > 0, err
 }
@@ -546,6 +561,17 @@ func (s *Store) MarkJobDone(ctx context.Context, id int64, finalSize int64) erro
 	return err
 }
 
+// MarkJobSkipped marks a job as skipped by a pre-encode filter (codec already
+// efficient, bitrate too low, etc.). The reason is stored in the `error`
+// column for surfacing in the UI; it isn't an error per se but the column is
+// already a free-text "why this is in a terminal state" slot.
+func (s *Store) MarkJobSkipped(ctx context.Context, id int64, reason string) error {
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE jobs SET status = 'skipped', finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP, error = ?, encode_log = ''
+		 WHERE id = ?`, reason, id)
+	return err
+}
+
 func (s *Store) MarkJobFailed(ctx context.Context, id int64, msg, encodeLog string) error {
 	_, err := s.DB.ExecContext(ctx,
 		`UPDATE jobs SET status = 'failed', finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP, error = ?, encode_log = ?
@@ -572,12 +598,12 @@ func (s *Store) RetryAllFailed(ctx context.Context) (int64, error) {
 }
 
 func (s *Store) DeleteJob(ctx context.Context, id int64) error {
-	_, err := s.DB.ExecContext(ctx, `DELETE FROM jobs WHERE id=? AND status IN ('done','failed')`, id)
+	_, err := s.DB.ExecContext(ctx, `DELETE FROM jobs WHERE id=? AND status IN ('done','failed','skipped')`, id)
 	return err
 }
 
 func (s *Store) DeleteTerminalJobs(ctx context.Context) (int64, error) {
-	res, err := s.DB.ExecContext(ctx, `DELETE FROM jobs WHERE status IN ('done','failed')`)
+	res, err := s.DB.ExecContext(ctx, `DELETE FROM jobs WHERE status IN ('done','failed','skipped')`)
 	if err != nil {
 		return 0, err
 	}

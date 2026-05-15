@@ -29,6 +29,7 @@ const (
 	StatusEncoding       Status = "encoding"
 	StatusDone           Status = "done"
 	StatusFailed         Status = "failed"
+	StatusSkipped        Status = "skipped"
 )
 
 type Job struct {
@@ -479,6 +480,17 @@ func (w *Worker) encodeOne(encCtx, parentCtx context.Context, j store.JobRow) {
 	profile, err := w.store.GetProfile(parentCtx, j.ProfileID.Int64)
 	if err != nil {
 		_ = w.store.MarkJobFailed(parentCtx, j.ID, "profile lookup: "+err.Error(), "")
+		return
+	}
+
+	// Pre-encode filters (per-profile). Run before disk-space because filtering
+	// is the cheapest way to reject a job — no point checking disk space for a
+	// file we're about to skip.
+	if skip, reason := evaluateFilters(parentCtx, profile, j); skip {
+		if err := w.store.MarkJobSkipped(parentCtx, j.ID, reason); err != nil {
+			slog.Error("mark skipped", "id", j.ID, "err", err)
+		}
+		slog.Info("job skipped by filter", "id", j.ID, "title", j.Title, "reason", reason)
 		return
 	}
 

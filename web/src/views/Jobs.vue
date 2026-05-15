@@ -38,6 +38,7 @@ const statusOptions = [
   { value: "encoding", label: "Encoding" },
   { value: "done", label: "Done" },
   { value: "failed", label: "Failed" },
+  { value: "skipped", label: "Skipped (filtered)" },
 ];
 
 const filteredJobs = computed(() => {
@@ -134,6 +135,7 @@ const severities: Record<JobStatus, "info" | "warn" | "success" | "danger" | "se
   encoding: "warn",
   done: "success",
   failed: "danger",
+  skipped: "secondary",
 };
 
 function formatBytes(n?: number) {
