@@ -32,12 +32,25 @@ export function useNotify() {
     }
   }
 
-  function confirmDelete(opts: { name: string; onAccept: () => void | Promise<void> }) {
+  /**
+   * Generic destructive-confirm. Pass `message` to override the default
+   * "Delete X? This cannot be undone." line — useful when the destructive
+   * action has nuance worth spelling out (e.g. "this only removes the DB row,
+   * the file on disk is untouched"). `header` / `acceptLabel` are similarly
+   * overridable; defaults match the simple-delete case.
+   */
+  function confirmDelete(opts: {
+    name: string;
+    message?: string;
+    header?: string;
+    acceptLabel?: string;
+    onAccept: () => void | Promise<void>;
+  }) {
     confirm.require({
-      message: `Delete "${opts.name}"? This cannot be undone.`,
-      header: "Delete confirmation",
+      message: opts.message ?? `Delete "${opts.name}"? This cannot be undone.`,
+      header: opts.header ?? "Delete confirmation",
       icon: "pi pi-exclamation-triangle",
-      acceptLabel: "Delete",
+      acceptLabel: opts.acceptLabel ?? "Delete",
       rejectLabel: "Cancel",
       acceptClass: "p-button-danger",
       accept: async () => {

@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -120,6 +121,17 @@ func handleArrWebhook(st *store.Store, kind arr.Kind) http.HandlerFunc {
 			return
 		}
 		filePath = clean
+		// Sidecar marker: if enabled and a `<stem>.<suffix>` file exists next to
+		// the media file, Recodarr has already encoded this file. Skip silently
+		// with 204 so *arr replays / re-imports are idempotent.
+		if cfg, err := st.LoadAppSettings(r.Context()); err == nil && cfg.OutputSuffixEnabled {
+			if sidecarExists(filePath, cfg.OutputSuffix) {
+				slog.Info("webhook skipped: sidecar present (already encoded)",
+					"kind", kind, "path", filePath, "suffix", cfg.OutputSuffix)
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+		}
 		jr := store.JobRow{
 			ArrKind:       string(kind),
 			ArrInstanceID: inst.ID,
@@ -183,6 +195,22 @@ func findTagProfile(ctx context.Context, st *store.Store, inst *store.ArrInstanc
 		}
 	}
 	return sql.NullInt64{}, false
+}
+
+// sidecarExists reports whether the marker file Recodarr writes after a
+// successful encode is present next to mediaPath. Marker has the same stem as
+// the media file with `suffix` as its extension (e.g. `Movie.mkv` →
+// `Movie.recodarr`). Any stat error is treated as "not present" — this is a
+// best-effort skip, not a security check.
+func sidecarExists(mediaPath, suffix string) bool {
+	if suffix == "" {
+		return false
+	}
+	dir := filepath.Dir(mediaPath)
+	base := filepath.Base(mediaPath)
+	stem := strings.TrimSuffix(base, filepath.Ext(base))
+	_, err := os.Stat(filepath.Join(dir, stem+"."+suffix))
+	return err == nil
 }
 
 // sanitizeMediaPath rejects paths that aren't well-formed absolute file paths.

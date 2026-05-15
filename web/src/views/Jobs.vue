@@ -93,13 +93,19 @@ async function cancel(id: number) {
 }
 
 function remove(id: number) {
+  const j = jobs.value.find((x) => x.id === id);
+  const name = j ? `${j.title} (job #${id})` : `job #${id}`;
   notify.confirmDelete({
-    name: `job #${id}`,
+    name,
+    header: "Remove job from history?",
+    acceptLabel: "Remove from history",
+    message:
+      "This removes the queue entry only. The encoded file on disk is NOT touched, and Sonarr/Radarr are not contacted.",
     onAccept: async () => {
       const ok = await withBusy(id, () =>
-        notify.tryRun(() => api.jobs.remove(id), "Couldn't delete"),
+        notify.tryRun(() => api.jobs.remove(id), "Couldn't remove"),
       );
-      if (ok !== undefined) jobs.value = jobs.value.filter((j) => j.id !== id);
+      if (ok !== undefined) jobs.value = jobs.value.filter((x) => x.id !== id);
     },
   });
 }
@@ -107,11 +113,15 @@ function remove(id: number) {
 function clearAll() {
   notify.confirmDelete({
     name: "all done and failed jobs",
+    header: "Clear job history?",
+    acceptLabel: "Clear history",
+    message:
+      "Removes every done and failed entry from this list. Files on disk are NOT touched, and Sonarr/Radarr are not contacted. In-flight and queued jobs are kept.",
     onAccept: async () => {
-      const res = await notify.tryRun(() => api.jobs.clearTerminal(), "Couldn't clear");
+      const res = await notify.tryRun(() => api.jobs.clearTerminal(), "Couldn't clear history");
       if (res) {
-        if (res.deleted === 0) notify.info("Nothing to delete");
-        else notify.success(`Deleted ${res.deleted} job(s)`);
+        if (res.deleted === 0) notify.info("Nothing to clear");
+        else notify.success(`Cleared ${res.deleted} entry/entries from history`);
         await load();
       }
     },
@@ -169,7 +179,10 @@ onUnmounted(() => {
     <div class="head">
       <div>
         <h1 class="page-title">Jobs</h1>
-        <p class="page-sub">All encode jobs across every connected *arr instance.</p>
+        <p class="page-sub">
+          Every encode tracked by Recodarr. The buttons here only manage this list — they never
+          touch files on disk or talk to Sonarr/Radarr.
+        </p>
       </div>
       <div class="head-actions">
         <Button text icon="pi pi-replay" label="Retry all failed" @click="retryAll" />
@@ -177,7 +190,8 @@ onUnmounted(() => {
           text
           severity="danger"
           icon="pi pi-trash"
-          label="Clear done/failed"
+          label="Clear history"
+          title="Remove all done and failed entries from this list. Files on disk are not touched."
           @click="clearAll"
         />
         <Button text icon="pi pi-refresh" label="Refresh" @click="load" />
@@ -283,7 +297,7 @@ onUnmounted(() => {
             size="small"
             severity="danger"
             icon="pi pi-trash"
-            title="Delete"
+            title="Remove from history (file on disk is not touched)"
             :loading="busy.has(data.id)"
             @click="remove(data.id)"
           />

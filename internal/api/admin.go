@@ -248,6 +248,18 @@ func putSettings(st *store.Store) http.HandlerFunc {
 			http.Error(w, "encoding_paused: expected 'true' or 'false'", http.StatusBadRequest)
 			return
 		}
+		if v, ok := m["output_suffix_enabled"]; ok && v != "true" && v != "false" {
+			http.Error(w, "output_suffix_enabled: expected 'true' or 'false'", http.StatusBadRequest)
+			return
+		}
+		if v, ok := m["output_suffix"]; ok {
+			if !isValidOutputSuffix(v) {
+				http.Error(w,
+					"output_suffix: 1–32 chars, letters/digits/dash/underscore only, no dots or path separators",
+					http.StatusBadRequest)
+				return
+			}
+		}
 		for k, v := range m {
 			if err := st.SetSetting(r.Context(), k, v); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -256,6 +268,28 @@ func putSettings(st *store.Store) http.HandlerFunc {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}
+}
+
+// isValidOutputSuffix gates the output_suffix setting. We're strict on purpose:
+// the suffix becomes part of every filename Recodarr writes, so it can't contain
+// path separators, leading/trailing dots (which would create hidden files or
+// double-dot stems), or whitespace. Empty is rejected because the toggle is
+// independent — disable via output_suffix_enabled, not by blanking the value.
+func isValidOutputSuffix(s string) bool {
+	if len(s) == 0 || len(s) > 32 {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '-' || r == '_':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func isValidHHMM(s string) bool {

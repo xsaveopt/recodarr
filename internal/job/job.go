@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -491,6 +492,7 @@ func (w *Worker) encodeOne(encCtx, parentCtx context.Context, j store.JobRow) {
 	onProgress := func(p handbrake.Progress) {
 		w.broadcast(ProgressEvent{JobID: j.ID, Title: j.Title, Percent: p.Percent, FPS: p.FPS, ETA: p.ETA})
 	}
+	cfg, _ := w.store.LoadAppSettings(parentCtx)
 	result, err := handbrake.Run(encCtx, j.FilePath, handbrake.Settings{
 		Encoder:         profile.Encoder,
 		EncoderPreset:   profile.EncoderPreset,
@@ -542,10 +544,63 @@ func (w *Worker) encodeOne(encCtx, parentCtx context.Context, j store.JobRow) {
 		slog.Error("mark done", "id", j.ID, "err", err)
 		return
 	}
-	slog.Info("encode done", "id", j.ID, "originalSize", j.FileSize, "finalSize", result.FinalSize)
+	// Drop a sidecar marker next to the encoded file so future webhook deliveries
+	// (replays, *arr re-imports, manual re-runs) can detect the file's already
+	// been processed without consulting the DB. Failure here doesn't fail the
+	// encode — the marker is an optimization, not a contract.
+	if cfg.OutputSuffixEnabled {
+		if err := writeSidecar(j.FilePath, cfg.OutputSuffix, j, profile, result.FinalSize); err != nil {
+			slog.Warn("sidecar write failed", "id", j.ID, "err", err)
+		}
+	}
+	slog.Info("encode done", "id", j.ID, "path", j.FilePath, "originalSize", j.FileSize, "finalSize", result.FinalSize)
 	go notify.Send(context.Background(), w.store, j.Title, "done", j.FilePath, j.FileSize, result.FinalSize)
 
 	w.refreshArr(parentCtx, j)
+}
+
+// sidecarPath returns the marker path Recodarr writes next to an encoded file
+// when the OutputSuffix feature is enabled. Same stem, different extension
+// (the suffix becomes the extension). For `.../Movie (2024).mkv` with suffix
+// `recodarr`, this returns `.../Movie (2024).recodarr`.
+func sidecarPath(mediaPath, suffix string) string {
+	dir := filepath.Dir(mediaPath)
+	base := filepath.Base(mediaPath)
+	stem := strings.TrimSuffix(base, filepath.Ext(base))
+	return filepath.Join(dir, stem+"."+suffix)
+}
+
+// writeSidecar emits a small human-readable marker file recording what Recodarr
+// did to this media file. Format is plain key=value lines so a user (or a
+// script) can grep it without parsing JSON. The presence of the file is the
+// load-bearing part — the contents are informational.
+func writeSidecar(mediaPath, suffix string, j store.JobRow, p *store.ProfileRow, finalSize int64) error {
+	path := sidecarPath(mediaPath, suffix)
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Recodarr re-encode marker — do not delete unless you want this file re-encoded.\n")
+	fmt.Fprintf(&b, "encoded_at=%s\n", time.Now().UTC().Format(time.RFC3339))
+	fmt.Fprintf(&b, "job_id=%d\n", j.ID)
+	fmt.Fprintf(&b, "title=%s\n", j.Title)
+	fmt.Fprintf(&b, "profile=%s\n", p.Name)
+	fmt.Fprintf(&b, "encoder=%s\n", p.Encoder)
+	if p.EncoderPreset != "" {
+		fmt.Fprintf(&b, "preset=%s\n", p.EncoderPreset)
+	}
+	if p.EncoderTune != "" {
+		fmt.Fprintf(&b, "tune=%s\n", p.EncoderTune)
+	}
+	if p.EncoderProfile != "" {
+		fmt.Fprintf(&b, "encoder_profile=%s\n", p.EncoderProfile)
+	}
+	fmt.Fprintf(&b, "quality=%d\n", p.Quality)
+	fmt.Fprintf(&b, "container=%s\n", p.ContainerFormat)
+	fmt.Fprintf(&b, "original_size=%d\n", j.FileSize)
+	fmt.Fprintf(&b, "final_size=%d\n", finalSize)
+	if j.FileSize > 0 {
+		pct := float64(j.FileSize-finalSize) / float64(j.FileSize) * 100
+		fmt.Fprintf(&b, "saved_percent=%.1f\n", pct)
+	}
+	return os.WriteFile(path, []byte(b.String()), 0o644)
 }
 
 // checkDiskSpace verifies the directory containing path has at least 1.1× needed bytes free.

@@ -10,11 +10,15 @@ import { useNotify } from "@/composables/useNotify";
 import type { AppSettings } from "@/types/api";
 
 const notify = useNotify();
+import { computed } from "vue";
+
 const intervalSeconds = ref<number>(30);
 const maxParallel = ref<number>(1);
 const windowStart = ref<string>("");
 const windowEnd = ref<string>("");
 const paused = ref<boolean>(false);
+const suffixEnabled = ref<boolean>(false);
+const outputSuffix = ref<string>("recodarr");
 
 async function load() {
   const s = await notify.tryRun(() => api.settings.get(), "Couldn't load settings");
@@ -24,8 +28,15 @@ async function load() {
     windowStart.value = s.encoding_window_start ?? "";
     windowEnd.value = s.encoding_window_end ?? "";
     paused.value = s.encoding_paused === "true";
+    suffixEnabled.value = s.output_suffix_enabled === "true";
+    outputSuffix.value = (s.output_suffix ?? "").trim() || "recodarr";
   }
 }
+
+const suffixValid = computed(() => /^[A-Za-z0-9_-]{1,32}$/.test(outputSuffix.value));
+const suffixPreview = computed(
+  () => `Movie (2024).mkv  →  Movie (2024).${outputSuffix.value || "recodarr"}`,
+);
 
 // The pause toggle calls the dedicated worker endpoint rather than the bulk
 // settings save, because pausing has a side-effect: it cancels and re-queues
@@ -60,11 +71,17 @@ async function save() {
     notify.error("Parallel encodes must be 1..16");
     return;
   }
+  if (!suffixValid.value) {
+    notify.error("Output suffix: 1–32 chars, letters/digits/dash/underscore only");
+    return;
+  }
   const updates: AppSettings = {
     worker_interval_seconds: String(intervalSeconds.value),
     max_parallel_encodes: String(maxParallel.value),
     encoding_window_start: windowStart.value.trim(),
     encoding_window_end: windowEnd.value.trim(),
+    output_suffix_enabled: suffixEnabled.value ? "true" : "false",
+    output_suffix: outputSuffix.value.trim(),
   };
   const ok = await notify.tryRun(() => api.settings.put(updates), "Couldn't save settings");
   if (ok !== undefined) notify.success("Worker settings saved");
@@ -140,6 +157,34 @@ onMounted(load);
       <div>
         <Button text size="small" label="Clear window (always encode)" @click="clearWindow" />
       </div>
+
+      <div class="section-title">Output marker</div>
+
+      <label class="pause-row">
+        <span>Write marker</span>
+        <span class="pause-control">
+          <ToggleSwitch v-model="suffixEnabled" />
+          <span class="muted small">{{
+            suffixEnabled
+              ? "A small marker file will be written next to each encoded file"
+              : "No marker is written"
+          }}</span>
+        </span>
+      </label>
+      <p class="muted small">
+        After every successful encode, Recodarr drops a tiny text file beside the media file with
+        the same name but the extension below. The encoded file itself is not renamed. Future
+        webhooks for any file with a matching marker are skipped so the same file can't
+        accidentally be re-encoded a second time.
+      </p>
+      <label>
+        <span>Marker extension</span>
+        <InputText v-model="outputSuffix" :disabled="!suffixEnabled" placeholder="recodarr" />
+      </label>
+      <p class="muted small">
+        Letters, digits, dashes, and underscores only — no dots or path separators. Preview:
+        <code>{{ suffixPreview }}</code>
+      </p>
     </div>
 
     <div class="actions">
