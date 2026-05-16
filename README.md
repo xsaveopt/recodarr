@@ -94,64 +94,13 @@ Plus the standard `go_*` runtime and `process_*` collectors.
 
 ## GPU acceleration
 
-The image is built with hardware encode and decode for all three vendors. Add the snippet for your card to the `recodarr` service in `docker-compose.yml`, then pick the matching encoder in your HandBrake profile. Verify the GPU is detected on Settings, Debug.
+The image ships hardware encode and decode for all three vendors. Pick the matching encoder family in your HandBrake profile (`nvenc_*`, `qsv_*`, `vce_*`) and Recodarr enables zero-copy hardware decode automatically. Verify on **Settings → Debug**.
 
-For each vendor: encoder names use that family's prefix (`nvenc_`, `qsv_`, `vce_`). Decode is automatic on the same family if you tick **Hardware Decode** in the profile.
+Setup is non-trivial and varies by vendor — full guides:
 
-### NVIDIA (NVENC + NVDEC)
-
-Host: install `nvidia-container-toolkit`, then `sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker`. Verify with `nvidia-smi` on the host.
-
-```yaml
-environment:
-  NVIDIA_VISIBLE_DEVICES: all
-  NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
-deploy:
-  resources:
-    reservations:
-      devices:
-        - driver: nvidia
-          count: all
-          capabilities: [gpu]
-```
-
-Encoders: `nvenc_h264`, `nvenc_h265`, `nvenc_h265_10bit`, `nvenc_av1` (Ada and newer).
-
-Pascal cards (P4/P40/P100/GTX 10xx) do not support `temporal-aq=1`, HEVC B-frames, or AV1. Stick to `spatial-aq=1:rc-lookahead=16` in extra args, leave Tune empty, and pick the `slow` or `medium` preset.
-
-### Intel (QSV + VAAPI)
-
-Host: nothing special. Confirm `/dev/dri/renderD128` exists.
-
-```yaml
-devices:
-  - /dev/dri:/dev/dri
-group_add:
-  - "104" # render, match host: getent group render | cut -d: -f3
-  - "44" # video
-```
-
-Encoders: `qsv_h264`, `qsv_h265`, `qsv_h265_10bit`, `qsv_av1` (Arc / 11th-gen+).
-
-Older iGPUs (Haswell through Skylake) only do H.264 reliably; HEVC needs Kaby Lake or newer.
-
-### AMD (VCE via VAAPI)
-
-Host: nothing special. Confirm `/dev/dri/renderD128` exists.
-
-```yaml
-devices:
-  - /dev/dri:/dev/dri
-group_add:
-  - "104"
-  - "44"
-```
-
-Encoders: `vce_h264`, `vce_h265`, `vce_h265_10bit`, `vce_av1` (RX 7000 series and newer).
-
-### Apple
-
-VideoToolbox only works when running the Recodarr binary natively on macOS, not in a Linux container. Not supported in Docker.
+- **NVIDIA (NVENC + NVDEC)** — see [`docs/gpu-nvidia.md`](docs/gpu-nvidia.md). Container Toolkit, `runtime: nvidia`, capability flags, per-generation codec matrix (Pascal → Blackwell), Pascal-specific gotchas.
+- **Intel (QSV + VA-API)** — see [`docs/gpu-intel.md`](docs/gpu-intel.md). `/dev/dri` passthrough, `render` group GID, kernel/driver matrix per generation (Haswell → Battlemage), low-power mode, AV1 hardware encode (Arc and newer).
+- **AMD (VCE via VA-API)** — same `/dev/dri` + `group_add` setup as Intel; use the `vce_*` encoder family. The Intel guide's device-passthrough section applies as-is.
 
 ## Image tags
 
