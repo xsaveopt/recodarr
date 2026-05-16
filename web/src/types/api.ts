@@ -186,6 +186,7 @@ export interface AppSettings {
   notify_on_fail?: string;
   notify_on_health?: string;
   log_app_level?: string;
+  log_rotate_enabled?: string;
   log_max_size_mb?: string;
   log_max_age_days?: string;
   log_max_backups?: string;

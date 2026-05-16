@@ -278,6 +278,10 @@ func putSettings(st *store.Store, lls LogLevelSetter) http.HandlerFunc {
 				return
 			}
 		}
+		if v, ok := m["log_rotate_enabled"]; ok && v != "true" && v != "false" {
+			http.Error(w, "log_rotate_enabled: expected 'true' or 'false'", http.StatusBadRequest)
+			return
+		}
 		for _, k := range []string{"log_max_size_mb", "log_max_age_days", "log_max_backups"} {
 			if v, ok := m[k]; ok {
 				n, err := strconv.Atoi(v)

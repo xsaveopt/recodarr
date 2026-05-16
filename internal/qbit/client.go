@@ -60,34 +60,39 @@ func (c *Client) Login(ctx context.Context) error {
 	body, _ := io.ReadAll(resp.Body)
 	trimmed := strings.TrimSpace(string(body))
 
-	if resp.StatusCode != http.StatusOK || trimmed != "Ok." {
-		// Loud diagnostic so we can tell apart CSRF vs. host-validation vs. wrong creds
-		// vs. ban. Includes the actual Host header Go sent and qBit's full response.
-		slog.Warn("qbit login failed",
-			"url", req.URL.String(),
-			"hostHeader", req.Host,
-			"status", resp.StatusCode,
-			"respBody", trimmed,
-			"respHeaders", flattenHeaders(resp.Header),
-		)
-	}
+	// Decide success first, then warn-and-return-error only on actual failures.
+	// Previously the warn fired on any "abnormal" response shape — including
+	// 204 No Content, which qBit returns when the client IP is in the
+	// "Bypass authentication for whitelisted subnets" list and is actually a
+	// success path. That made the log scream every poll while the test
+	// endpoint reported OK.
+	var loginErr error
 	switch {
 	// Explicit failure: qBit returned 200 with the literal "Fails." body.
 	case resp.StatusCode == http.StatusOK && trimmed == "Fails.":
-		return fmt.Errorf("qbit rejected credentials (wrong username or password)")
-	// Any 2xx is treated as success. 200 + "Ok." is the normal login response;
-	// 204 No Content is what qBit returns when the client IP is in the
-	// "Bypass authentication for clients on whitelisted IP subnets" list and no
-	// login is required.
+		loginErr = fmt.Errorf("qbit rejected credentials (wrong username or password)")
+	// Any 2xx is success. 200 + "Ok." is the normal login response; 204 No
+	// Content is the IP-whitelist bypass.
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		return nil
 	case resp.StatusCode == http.StatusForbidden:
-		return fmt.Errorf("qbit returned 403 (likely IP-banned after failed attempts; restart qBittorrent or wait the ban out)")
+		loginErr = fmt.Errorf("qbit returned 403 (likely IP-banned after failed attempts; restart qBittorrent or wait the ban out)")
 	case resp.StatusCode == http.StatusUnauthorized:
-		return fmt.Errorf(`qbit returned 401. Most likely qBit's "Server domains" (Tools → Options → Web UI) is set to something restrictive that excludes %q, or there's a port mismatch between qBit's bind port and the URL host. Body: %q`, hostOnly(c.baseURL), trimmed)
+		loginErr = fmt.Errorf(`qbit returned 401. Most likely qBit's "Server domains" (Tools → Options → Web UI) is set to something restrictive that excludes %q, or there's a port mismatch between qBit's bind port and the URL host. Body: %q`, hostOnly(c.baseURL), trimmed)
 	default:
-		return fmt.Errorf("qbit login failed: status=%d body=%q", resp.StatusCode, trimmed)
+		loginErr = fmt.Errorf("qbit login failed: status=%d body=%q", resp.StatusCode, trimmed)
 	}
+	// Loud diagnostic so we can tell apart CSRF vs. host-validation vs. wrong
+	// creds vs. ban. Includes the actual Host header Go sent and qBit's full
+	// response.
+	slog.Warn("qbit login failed",
+		"url", req.URL.String(),
+		"hostHeader", req.Host,
+		"status", resp.StatusCode,
+		"respBody", trimmed,
+		"respHeaders", flattenHeaders(resp.Header),
+	)
+	return loginErr
 }
 
 // flattenHeaders serializes response headers as a single string for logging.

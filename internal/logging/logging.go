@@ -105,13 +105,14 @@ func (s *Sinks) HandbrakeFor(jobID int64) io.Writer {
 // (useful for tests and one-shot CLI subcommands). MaxSizeMB / MaxAgeDays /
 // MaxBackups follow lumberjack's defaults if zero.
 type Options struct {
-	Dir         string // directory for *.log files; empty = stdout-only
-	MaxSizeMB   int
-	MaxAgeDays  int
-	MaxBackups  int
-	Compress    bool
-	AppLevel    slog.Level // default INFO; honored even when Dir is empty
-	AccessLevel slog.Level
+	Dir           string // directory for *.log files; empty = stdout-only
+	RotateEnabled bool   // when false, files are plain *os.File in append mode (grow unbounded)
+	MaxSizeMB     int
+	MaxAgeDays    int
+	MaxBackups    int
+	Compress      bool
+	AppLevel      slog.Level // default INFO; honored even when Dir is empty
+	AccessLevel   slog.Level
 }
 
 // Setup builds the Sinks. Returned Sinks installs Sinks.App as slog.Default so
@@ -121,14 +122,13 @@ type Options struct {
 // touch the directory and the file at startup, surfacing permission errors
 // loudly rather than burying them at first-write time hours later.
 func Setup(opts Options) (*Sinks, error) {
+	// We only default MaxSizeMB. MaxAgeDays=0 and MaxBackups=0 are valid
+	// user-facing values meaning "no limit" (matching lumberjack's own
+	// semantics) — don't substitute them. The persisted settings layer
+	// supplies its own first-use defaults (50/30/5); callers like tests
+	// that pass an empty Options still get a sane file size cap.
 	if opts.MaxSizeMB == 0 {
 		opts.MaxSizeMB = 50
-	}
-	if opts.MaxAgeDays == 0 {
-		opts.MaxAgeDays = 30
-	}
-	if opts.MaxBackups == 0 {
-		opts.MaxBackups = 5
 	}
 
 	levelVar := &slog.LevelVar{}
@@ -152,9 +152,18 @@ func Setup(opts Options) (*Sinks, error) {
 		return nil, fmt.Errorf("create log dir %s: %w", opts.Dir, err)
 	}
 
-	access := newRotator(filepath.Join(opts.Dir, "access.log"), opts)
-	outbound := newRotator(filepath.Join(opts.Dir, "outbound.log"), opts)
-	handbrake := newRotator(filepath.Join(opts.Dir, "handbrake.log"), opts)
+	access, err := openSink(filepath.Join(opts.Dir, "access.log"), opts)
+	if err != nil {
+		return nil, err
+	}
+	outbound, err := openSink(filepath.Join(opts.Dir, "outbound.log"), opts)
+	if err != nil {
+		return nil, err
+	}
+	handbrake, err := openSink(filepath.Join(opts.Dir, "handbrake.log"), opts)
+	if err != nil {
+		return nil, err
+	}
 	s.closers = append(s.closers, access, outbound, handbrake)
 
 	level := opts.AccessLevel
@@ -162,24 +171,39 @@ func Setup(opts Options) (*Sinks, error) {
 	s.Outbound = slog.New(slog.NewJSONHandler(outbound, &slog.HandlerOptions{Level: level}))
 	s.Handbrake = handbrake
 
-	s.App.Info("logging initialized",
-		"dir", opts.Dir,
-		"max_size_mb", opts.MaxSizeMB,
-		"max_backups", opts.MaxBackups,
-		"max_age_days", opts.MaxAgeDays,
-	)
+	if opts.RotateEnabled {
+		s.App.Info("logging initialized",
+			"dir", opts.Dir,
+			"rotate", true,
+			"max_size_mb", opts.MaxSizeMB,
+			"max_backups", opts.MaxBackups,
+			"max_age_days", opts.MaxAgeDays,
+		)
+	} else {
+		s.App.Info("logging initialized", "dir", opts.Dir, "rotate", false)
+	}
 	return s, nil
 }
 
-func newRotator(path string, opts Options) *lumberjack.Logger {
-	return &lumberjack.Logger{
-		Filename:   path,
-		MaxSize:    opts.MaxSizeMB,
-		MaxAge:     opts.MaxAgeDays,
-		MaxBackups: opts.MaxBackups,
-		Compress:   opts.Compress,
-		LocalTime:  true,
+// openSink returns the writer for one log file. With rotation it's a
+// lumberjack.Logger; without, it's a plain *os.File opened in append mode.
+// Both satisfy io.WriteCloser.
+func openSink(path string, opts Options) (io.WriteCloser, error) {
+	if opts.RotateEnabled {
+		return &lumberjack.Logger{
+			Filename:   path,
+			MaxSize:    opts.MaxSizeMB,
+			MaxAge:     opts.MaxAgeDays,
+			MaxBackups: opts.MaxBackups,
+			Compress:   opts.Compress,
+			LocalTime:  true,
+		}, nil
 	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", path, err)
+	}
+	return f, nil
 }
 
 // ── App stdout handler ─────────────────────────────────────────────────

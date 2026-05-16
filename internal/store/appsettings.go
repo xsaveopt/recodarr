@@ -29,10 +29,11 @@ type AppSettings struct {
 	// LogMaxSizeMB, LogMaxAgeDays, LogMaxBackups, LogCompress control the
 	// rotation policy of the file sinks (access.log / outbound.log /
 	// handbrake.log under <data-dir>/logs/). Changes take effect on restart.
-	LogMaxSizeMB  int
-	LogMaxAgeDays int
-	LogMaxBackups int
-	LogCompress   bool
+	LogRotateEnabled bool // default true; when false, files grow unbounded
+	LogMaxSizeMB     int
+	LogMaxAgeDays    int
+	LogMaxBackups    int
+	LogCompress      bool
 }
 
 // settings table keys — the only place these magic strings should appear.
@@ -49,11 +50,12 @@ const (
 	keyNotifyOnFail          = "notify_on_fail"
 	keyNotifyOnHealth        = "notify_on_health"
 
-	keyLogAppLevel   = "log_app_level"
-	keyLogMaxSizeMB  = "log_max_size_mb"
-	keyLogMaxAgeDays = "log_max_age_days"
-	keyLogMaxBackups = "log_max_backups"
-	keyLogCompress   = "log_compress"
+	keyLogAppLevel       = "log_app_level"
+	keyLogRotateEnabled  = "log_rotate_enabled"
+	keyLogMaxSizeMB      = "log_max_size_mb"
+	keyLogMaxAgeDays     = "log_max_age_days"
+	keyLogMaxBackups     = "log_max_backups"
+	keyLogCompress       = "log_compress"
 )
 
 // MaxParallelEncodesCap is the absolute hard limit on concurrent encodes,
@@ -71,6 +73,7 @@ func (s *Store) LoadAppSettings(ctx context.Context) (AppSettings, error) {
 		NotifyOnFail:          true,
 		NotifyOnHealth:        true,
 		LogAppLevel:           "INFO",
+		LogRotateEnabled:      true,
 		LogMaxSizeMB:          50,
 		LogMaxAgeDays:         30,
 		LogMaxBackups:         5,
@@ -115,6 +118,9 @@ func (s *Store) LoadAppSettings(ctx context.Context) (AppSettings, error) {
 		case "DEBUG", "INFO", "WARN", "ERROR":
 			cfg.LogAppLevel = strings.ToUpper(strings.TrimSpace(v))
 		}
+	}
+	if v, ok := all[keyLogRotateEnabled]; ok {
+		cfg.LogRotateEnabled = v == "true"
 	}
 	if v, ok := all[keyLogMaxSizeMB]; ok {
 		if n, err := strconv.Atoi(v); err == nil && n >= 1 {

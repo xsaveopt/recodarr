@@ -62,12 +62,13 @@ func run() error {
 	logCfg, _ := st.LoadAppSettings(context.Background())
 
 	sinks, err := logging.Setup(logging.Options{
-		Dir:        filepath.Join(dataDir, "logs"),
-		AppLevel:   logging.ParseLevel(logCfg.LogAppLevel),
-		MaxSizeMB:  logCfg.LogMaxSizeMB,
-		MaxAgeDays: logCfg.LogMaxAgeDays,
-		MaxBackups: logCfg.LogMaxBackups,
-		Compress:   logCfg.LogCompress,
+		Dir:           filepath.Join(dataDir, "logs"),
+		AppLevel:      logging.ParseLevel(logCfg.LogAppLevel),
+		RotateEnabled: logCfg.LogRotateEnabled,
+		MaxSizeMB:     logCfg.LogMaxSizeMB,
+		MaxAgeDays:    logCfg.LogMaxAgeDays,
+		MaxBackups:    logCfg.LogMaxBackups,
+		Compress:      logCfg.LogCompress,
 	})
 	if err != nil {
 		return fmt.Errorf("logging setup: %w", err)

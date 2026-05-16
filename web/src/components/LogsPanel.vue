@@ -12,6 +12,7 @@ import type { AppSettings } from "@/types/api";
 const notify = useNotify();
 
 const appLevel = ref<string>("INFO");
+const rotateEnabled = ref<boolean>(true);
 const maxSizeMB = ref<number>(50);
 const maxAgeDays = ref<number>(30);
 const maxBackups = ref<number>(5);
@@ -24,13 +25,20 @@ const levels = [
   { label: "ERROR — errors only", value: "ERROR" },
 ];
 
+function readInt(v: string | undefined, fallback: number): number {
+  if (v === undefined || v === "") return fallback;
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 async function load() {
   const s = await notify.tryRun(() => api.settings.get(), "Couldn't load settings");
   if (s) {
     appLevel.value = (s.log_app_level ?? "INFO").toUpperCase();
-    maxSizeMB.value = parseInt(s.log_max_size_mb ?? "50") || 50;
-    maxAgeDays.value = parseInt(s.log_max_age_days ?? "30") || 30;
-    maxBackups.value = parseInt(s.log_max_backups ?? "5") || 5;
+    rotateEnabled.value = s.log_rotate_enabled !== "false";
+    maxSizeMB.value = readInt(s.log_max_size_mb, 50);
+    maxAgeDays.value = readInt(s.log_max_age_days, 30);
+    maxBackups.value = readInt(s.log_max_backups, 5);
     compress.value = s.log_compress === "true";
   }
 }
@@ -42,6 +50,7 @@ async function save() {
   }
   const updates: AppSettings = {
     log_app_level: appLevel.value,
+    log_rotate_enabled: rotateEnabled.value ? "true" : "false",
     log_max_size_mb: String(maxSizeMB.value),
     log_max_age_days: String(maxAgeDays.value),
     log_max_backups: String(maxBackups.value),
@@ -75,7 +84,14 @@ onMounted(load);
         <code>handbrake.log</code> under <code>&lt;data-dir&gt;/logs/</code>. Changes take effect
         on next restart.
       </p>
-      <div class="form">
+      <label class="row">
+        <span>Enable rotation</span>
+        <ToggleSwitch v-model="rotateEnabled" />
+      </label>
+      <p v-if="!rotateEnabled" class="muted small warn">
+        Rotation is off — log files will grow without bound. You're responsible for cleaning them up.
+      </p>
+      <div v-if="rotateEnabled" class="form">
         <label class="row">
           <span>Max file size (MB)</span>
           <InputNumber v-model="maxSizeMB" :min="1" :max="1024" showButtons />
@@ -92,11 +108,11 @@ onMounted(load);
           <span>Gzip rotated files</span>
           <ToggleSwitch v-model="compress" />
         </label>
+        <p class="muted small">
+          Set days or backups to <code>0</code> to keep forever. A single log file is capped at
+          the size above; once exceeded it's rotated and a new one is started.
+        </p>
       </div>
-      <p class="muted small">
-        Set days or backups to <code>0</code> to disable that policy. A single log file is capped
-        at the size above; once exceeded it's rotated and a new one is started.
-      </p>
     </section>
 
     <div class="actions">
@@ -128,6 +144,9 @@ onMounted(load);
 }
 .small {
   font-size: 0.78rem;
+}
+.warn {
+  color: var(--rc-warn);
 }
 .form {
   display: flex;
