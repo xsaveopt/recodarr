@@ -191,6 +191,15 @@ onUnmounted(() => {
         Window {{ workerStatus.window.start }}–{{ workerStatus.window.end }} ·
         {{ workerStatus.window.active ? "active" : "paused" }}
       </span>
+      <span
+        v-if="health"
+        class="strip-pill"
+        :class="health.ok ? 'pill-ok' : 'pill-warn'"
+        :title="health.ok ? 'All system checks passing' : `${health.issues.length} active issue(s)`"
+      >
+        <i class="pi" :class="health.ok ? 'pi-check-circle' : 'pi-exclamation-circle'"></i>
+        {{ health.ok ? "Healthy" : `${health.issues.length} issue${health.issues.length === 1 ? "" : "s"}` }}
+      </span>
       <span class="strip-tick muted tnum"
         >last tick {{ relativeTime(workerStatus.lastTickAt) }}</span
       >

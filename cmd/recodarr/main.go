@@ -49,9 +49,25 @@ func run() error {
 		}
 	}
 
+	// Open the store first so logging can pick up the user's persisted
+	// rotation/level settings before we start writing rotated files. Goose's
+	// boot messages during migrate go through the bootstrap slog default
+	// (JSON-to-stderr) — fine for a one-shot startup event.
+	st, err := store.Open(dataDir + "/recodarr.db")
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	logCfg, _ := st.LoadAppSettings(context.Background())
+
 	sinks, err := logging.Setup(logging.Options{
-		Dir:      filepath.Join(dataDir, "logs"),
-		AppLevel: slog.LevelInfo,
+		Dir:        filepath.Join(dataDir, "logs"),
+		AppLevel:   logging.ParseLevel(logCfg.LogAppLevel),
+		MaxSizeMB:  logCfg.LogMaxSizeMB,
+		MaxAgeDays: logCfg.LogMaxAgeDays,
+		MaxBackups: logCfg.LogMaxBackups,
+		Compress:   logCfg.LogCompress,
 	})
 	if err != nil {
 		return fmt.Errorf("logging setup: %w", err)
@@ -63,12 +79,6 @@ func run() error {
 	// transport so calls land in outbound.log instead of stdout.
 	qbit.HTTPTransport = logging.OutboundTransport(http.DefaultTransport, sinks.Outbound)
 	arr.HTTPTransport = logging.OutboundTransport(http.DefaultTransport, sinks.Outbound)
-
-	st, err := store.Open(dataDir + "/recodarr.db")
-	if err != nil {
-		return fmt.Errorf("open store: %w", err)
-	}
-	defer func() { _ = st.Close() }()
 
 	// Best-effort cleanup of expired session rows on boot.
 	_ = auth.New(st.DB).PurgeExpiredSessions(context.Background())
@@ -95,7 +105,7 @@ func run() error {
 
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           api.NewRouter(st, worker, hc, web.Assets(), sinks.Access),
+		Handler:           api.NewRouter(st, worker, hc, sinks, web.Assets(), sinks.Access),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -140,7 +150,7 @@ func recoverOrphanEncodes(ctx context.Context, st *store.Store) {
 			if strings.HasPrefix(e.Name(), needle) {
 				full := filepath.Join(dir, e.Name())
 				if err := os.Remove(full); err == nil {
-					slog.Info("removed stale encode tmp", "path", full)
+					slog.Debug("removed stale encode tmp", "path", full)
 				}
 			}
 		}

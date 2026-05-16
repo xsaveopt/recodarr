@@ -35,6 +35,11 @@ type Sinks struct {
 	// Format is compact text: "<TIME>  INFO  message  key=value".
 	App *slog.Logger
 
+	// AppLevel is the live-updatable threshold for the App logger. Settings
+	// changes from the UI flip this with SetLevel; the handler re-reads it
+	// per record.
+	AppLevel *slog.LevelVar
+
 	// Access logs every inbound HTTP request to access.log. JSON format
 	// so it's easy to grep / pipe to jq.
 	Access *slog.Logger
@@ -52,6 +57,29 @@ type Sinks struct {
 	// closers are file handles / rotators we hold so Close can flush them
 	// cleanly on shutdown. Pure stdout sinks have no entry here.
 	closers []io.Closer
+}
+
+// SetAppLevel changes the live threshold for the App logger. Safe to call
+// at any time from any goroutine.
+func (s *Sinks) SetAppLevel(l slog.Level) {
+	if s.AppLevel != nil {
+		s.AppLevel.Set(l)
+	}
+}
+
+// ParseLevel maps the user-facing names ("DEBUG"/"INFO"/"WARN"/"ERROR") onto
+// slog levels. Unknown values fall back to INFO.
+func ParseLevel(s string) slog.Level {
+	switch strings.ToUpper(strings.TrimSpace(s)) {
+	case "DEBUG":
+		return slog.LevelDebug
+	case "WARN", "WARNING":
+		return slog.LevelWarn
+	case "ERROR":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
 }
 
 // Close flushes any open log files. Safe to call multiple times; the rotators
@@ -103,8 +131,11 @@ func Setup(opts Options) (*Sinks, error) {
 		opts.MaxBackups = 5
 	}
 
+	levelVar := &slog.LevelVar{}
+	levelVar.Set(opts.AppLevel)
 	s := &Sinks{
-		App: slog.New(newAppHandler(os.Stdout, opts.AppLevel)),
+		App:      slog.New(newAppHandler(os.Stdout, levelVar)),
+		AppLevel: levelVar,
 	}
 	slog.SetDefault(s.App)
 
@@ -164,17 +195,17 @@ func newRotator(path string, opts Options) *lumberjack.Logger {
 
 type appHandler struct {
 	w     io.Writer
-	level slog.Level
+	level *slog.LevelVar // shared with Sinks.AppLevel; re-read per record
 	attrs []slog.Attr
 	group string
 }
 
-func newAppHandler(w io.Writer, level slog.Level) *appHandler {
+func newAppHandler(w io.Writer, level *slog.LevelVar) *appHandler {
 	return &appHandler{w: w, level: level}
 }
 
 func (h *appHandler) Enabled(_ context.Context, l slog.Level) bool {
-	return l >= h.level
+	return l >= h.level.Level()
 }
 
 func (h *appHandler) Handle(_ context.Context, r slog.Record) error {

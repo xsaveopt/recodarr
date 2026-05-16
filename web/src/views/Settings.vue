@@ -11,6 +11,7 @@ import ProfilesPanel from "@/components/ProfilesPanel.vue";
 import MappingsPanel from "@/components/MappingsPanel.vue";
 import WorkerPanel from "@/components/WorkerPanel.vue";
 import NotificationsPanel from "@/components/NotificationsPanel.vue";
+import LogsPanel from "@/components/LogsPanel.vue";
 </script>
 
 <template>
@@ -27,6 +28,7 @@ import NotificationsPanel from "@/components/NotificationsPanel.vue";
         <Tab value="mappings">Mappings</Tab>
         <Tab value="worker">Worker</Tab>
         <Tab value="notifications">Notifications</Tab>
+        <Tab value="logs">Logs</Tab>
       </TabList>
       <TabPanels>
         <TabPanel value="arr"><ArrInstancesPanel /></TabPanel>
@@ -35,6 +37,7 @@ import NotificationsPanel from "@/components/NotificationsPanel.vue";
         <TabPanel value="mappings"><MappingsPanel /></TabPanel>
         <TabPanel value="worker"><WorkerPanel /></TabPanel>
         <TabPanel value="notifications"><NotificationsPanel /></TabPanel>
+        <TabPanel value="logs"><LogsPanel /></TabPanel>
       </TabPanels>
     </Tabs>
   </section>

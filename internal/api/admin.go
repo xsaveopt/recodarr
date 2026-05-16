@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -17,6 +18,7 @@ import (
 	"github.com/sratabix/recodarr/internal/handbrake"
 	"github.com/sratabix/recodarr/internal/health"
 	"github.com/sratabix/recodarr/internal/job"
+	"github.com/sratabix/recodarr/internal/logging"
 	"github.com/sratabix/recodarr/internal/qbit"
 	"github.com/sratabix/recodarr/internal/arr"
 	"github.com/sratabix/recodarr/internal/store"
@@ -158,7 +160,14 @@ type statsDTO struct {
 	TotalSavedBytes int64 `json:"totalSavedBytes"`
 }
 
-func registerAdminRoutes(r chi.Router, st *store.Store, w workerClient, hc *health.Checker) {
+// LogLevelSetter is the surface area the settings handler needs to push live
+// log-level changes into the logging subsystem without depending on its
+// concrete types. Satisfied by *logging.Sinks.
+type LogLevelSetter interface {
+	SetAppLevel(slog.Level)
+}
+
+func registerAdminRoutes(r chi.Router, st *store.Store, w workerClient, hc *health.Checker, lls LogLevelSetter) {
 	r.Get("/handbrake/caps", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, handbrake.QueryCaps())
 	})
@@ -192,7 +201,7 @@ func registerAdminRoutes(r chi.Router, st *store.Store, w workerClient, hc *heal
 
 	r.Route("/settings", func(r chi.Router) {
 		r.Get("/", getSettings(st))
-		r.Put("/", putSettings(st))
+		r.Put("/", putSettings(st, lls))
 	})
 
 	r.Route("/arr-instances", func(r chi.Router) {
@@ -253,12 +262,34 @@ func getSettings(st *store.Store) http.HandlerFunc {
 	}
 }
 
-func putSettings(st *store.Store) http.HandlerFunc {
+func putSettings(st *store.Store, lls LogLevelSetter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var m map[string]string
 		if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
 			http.Error(w, "bad payload", http.StatusBadRequest)
 			return
+		}
+		if v, ok := m["log_app_level"]; ok {
+			switch strings.ToUpper(strings.TrimSpace(v)) {
+			case "DEBUG", "INFO", "WARN", "ERROR":
+				m["log_app_level"] = strings.ToUpper(strings.TrimSpace(v))
+			default:
+				http.Error(w, "log_app_level: expected DEBUG, INFO, WARN, or ERROR", http.StatusBadRequest)
+				return
+			}
+		}
+		for _, k := range []string{"log_max_size_mb", "log_max_age_days", "log_max_backups"} {
+			if v, ok := m[k]; ok {
+				n, err := strconv.Atoi(v)
+				if err != nil || n < 0 {
+					http.Error(w, k+": expected non-negative integer", http.StatusBadRequest)
+					return
+				}
+				if k == "log_max_size_mb" && n < 1 {
+					http.Error(w, k+": expected integer ≥ 1", http.StatusBadRequest)
+					return
+				}
+			}
 		}
 		for _, k := range []string{"encoding_window_start", "encoding_window_end"} {
 			if v, ok := m[k]; ok && v != "" && !isValidHHMM(v) {
@@ -296,6 +327,9 @@ func putSettings(st *store.Store) http.HandlerFunc {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
+		}
+		if v, ok := m["log_app_level"]; ok && lls != nil {
+			lls.SetAppLevel(logging.ParseLevel(v))
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}

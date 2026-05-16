@@ -75,7 +75,7 @@ func Send(ctx context.Context, st *store.Store, title, status, filePath string, 
 		return
 	}
 	_ = resp.Body.Close()
-	slog.Info("notification sent", "status", status, "title", title, "httpStatus", resp.StatusCode)
+	slog.Debug("notification sent", "status", status, "title", title, "httpStatus", resp.StatusCode)
 }
 
 // SendHealth fires a notification for a health issue transition. transition is
@@ -128,7 +128,7 @@ func SendHealth(ctx context.Context, st *store.Store, source, title, detail, lev
 		return
 	}
 	_ = resp.Body.Close()
-	slog.Info("health notification sent", "source", source, "transition", transition, "httpStatus", resp.StatusCode)
+	slog.Debug("health notification sent", "source", source, "transition", transition, "httpStatus", resp.StatusCode)
 }
 
 func formatBytes(n int64) string {

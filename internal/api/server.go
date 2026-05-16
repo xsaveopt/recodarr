@@ -18,7 +18,7 @@ import (
 	"github.com/sratabix/recodarr/internal/store"
 )
 
-func NewRouter(st *store.Store, worker *job.Worker, hc *health.Checker, assets fs.FS, access *slog.Logger) http.Handler {
+func NewRouter(st *store.Store, worker *job.Worker, hc *health.Checker, lls LogLevelSetter, assets fs.FS, access *slog.Logger) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	// Only honor X-Forwarded-For / X-Real-IP when explicitly told there's a trusted
@@ -61,7 +61,7 @@ func NewRouter(st *store.Store, worker *job.Worker, hc *health.Checker, assets f
 
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.Timeout(30 * time.Second))
-				registerAdminRoutes(r, st, worker, hc)
+				registerAdminRoutes(r, st, worker, hc, lls)
 			})
 		})
 	})

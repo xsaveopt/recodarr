@@ -89,7 +89,7 @@ func handleArrWebhook(st *store.Store, kind arr.Kind) http.HandlerFunc {
 			http.Error(w, "bad payload", http.StatusBadRequest)
 			return
 		}
-		slog.Info("webhook received",
+		slog.Debug("webhook received",
 			"kind", kind, "id", instID,
 			"event", item.EventType,
 			"title", item.ParentTitle,
@@ -100,13 +100,13 @@ func handleArrWebhook(st *store.Store, kind arr.Kind) http.HandlerFunc {
 			return
 		}
 		if !processableEvents[item.EventType] {
-			slog.Info("webhook: event ignored", "kind", kind, "event", item.EventType)
+			slog.Debug("webhook: event ignored", "kind", kind, "event", item.EventType)
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		profileID, ok := findTagProfile(r.Context(), st, inst, item.ParentTags)
 		if !ok {
-			slog.Info("webhook filtered out", "kind", kind, "title", item.ParentTitle, "size", item.Size)
+			slog.Debug("webhook filtered out", "kind", kind, "title", item.ParentTitle, "size", item.Size)
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -126,7 +126,7 @@ func handleArrWebhook(st *store.Store, kind arr.Kind) http.HandlerFunc {
 		// with 204 so *arr replays / re-imports are idempotent.
 		if cfg, err := st.LoadAppSettings(r.Context()); err == nil && cfg.OutputSuffixEnabled {
 			if sidecarExists(filePath, cfg.OutputSuffix) {
-				slog.Info("webhook skipped: sidecar present (already encoded)",
+				slog.Debug("webhook skipped: sidecar present (already encoded)",
 					"kind", kind, "path", filePath, "suffix", cfg.OutputSuffix)
 				w.WriteHeader(http.StatusNoContent)
 				return

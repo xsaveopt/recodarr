@@ -185,5 +185,10 @@ export interface AppSettings {
   notify_on_done?: string;
   notify_on_fail?: string;
   notify_on_health?: string;
+  log_app_level?: string;
+  log_max_size_mb?: string;
+  log_max_age_days?: string;
+  log_max_backups?: string;
+  log_compress?: string;
   [key: string]: string | undefined;
 }

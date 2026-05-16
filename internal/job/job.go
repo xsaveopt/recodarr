@@ -392,7 +392,7 @@ func (w *Worker) transition(ctx context.Context, id int64, from, to, reason stri
 		return
 	}
 	if ok {
-		slog.Info("job transitioned", "id", id, "from", from, "to", to, "reason", reason)
+		slog.Debug("job transitioned", "id", id, "from", from, "to", to, "reason", reason)
 	}
 }
 
@@ -549,7 +549,7 @@ func (w *Worker) encodeOne(encCtx, parentCtx context.Context, j store.JobRow) {
 		attempt++
 		if attempt > 1 {
 			fmt.Fprintf(&combinedLog, "\n--- retry %d (CRF %d) ---\n", attempt-1, currentQuality)
-			slog.Info("size-guard retry", "id", j.ID, "attempt", attempt, "quality", currentQuality)
+			slog.Debug("size-guard retry", "id", j.ID, "attempt", attempt, "quality", currentQuality)
 		}
 		lastResult, lastErr = handbrake.Run(encCtx, j.FilePath, handbrake.Settings{
 			Encoder:         profile.Encoder,
@@ -646,7 +646,7 @@ func (w *Worker) encodeOne(encCtx, parentCtx context.Context, j store.JobRow) {
 			if err := w.store.RequeueEncoding(parentCtx, j.ID); err != nil {
 				slog.Error("requeue after pause-cancel failed", "id", j.ID, "err", err)
 			} else {
-				slog.Info("requeued after pause-cancel", "id", j.ID)
+				slog.Debug("requeued after pause-cancel", "id", j.ID)
 			}
 			return
 		}

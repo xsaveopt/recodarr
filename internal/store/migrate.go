@@ -194,7 +194,10 @@ func (gooseLogger) Fatalf(format string, v ...interface{}) {
 	slog.Error("goose: " + fmt.Sprintf(format, v...))
 }
 func (gooseLogger) Printf(format string, v ...interface{}) {
-	slog.Info("goose: " + fmt.Sprintf(format, v...))
+	// Goose's Printf fires for every applied migration and the
+	// "current version: N" message. Useful when something goes wrong, not
+	// useful in the operator's docker logs on every boot.
+	slog.Debug("goose: " + fmt.Sprintf(format, v...))
 }
 
 // Compile-time check that gooseLogger satisfies goose.Logger.
