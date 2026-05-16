@@ -63,14 +63,15 @@ watch(
 );
 
 async function load() {
-  const res = await notify.tryRun(
-    () => Promise.all([api.profiles.list(), api.handbrake.caps()]),
-    "Couldn't load profiles",
-  );
-  if (res) {
-    items.value = res[0] ?? [];
-    caps.value = res[1] ?? { encoders: [] };
-  }
+  // Render the profiles table as soon as the DB query returns; HandBrake caps
+  // (encoder discovery, slow on a cold cache because it shells out to
+  // HandBrakeCLI per encoder) fills in behind the scenes. Caps are only
+  // needed inside the edit dialog, so the table doesn't have to wait.
+  const list = await notify.tryRun(() => api.profiles.list(), "Couldn't load profiles");
+  if (list) items.value = list;
+
+  const c = await notify.tryRun(() => api.handbrake.caps(), "Couldn't load HandBrake capabilities");
+  if (c) caps.value = c;
 }
 
 const containerOptions = [

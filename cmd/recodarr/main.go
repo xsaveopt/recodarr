@@ -108,6 +108,12 @@ func runServer() error {
 		logger.Warn("HandBrakeCLI not found on PATH — encodes will fail until installed")
 	} else {
 		logger.Info("handbrake detected", "version", strings.SplitN(v, "\n", 2)[0])
+		// Warm the encoder caps cache in the background so the first hit
+		// to the Profiles page doesn't pay the ~15 × `HandBrakeCLI
+		// --encoder-preset-list` shell-out tax. QueryCaps is sync.Once
+		// behind, so this just guarantees the work happens during startup
+		// instead of on first UI navigation.
+		go handbrake.QueryCaps()
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
