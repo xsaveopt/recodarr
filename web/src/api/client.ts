@@ -108,6 +108,17 @@ export const api = {
     setPaused: (paused: boolean) =>
       request<{ paused: boolean; cancelled: number }>("POST", "/worker/pause", { paused }),
   },
+  agent: {
+    test: (body: { url?: string; token?: string }) =>
+      request<{
+        ok: boolean;
+        error?: string;
+        version?: string;
+        hb?: string;
+        slots?: number;
+        active?: number;
+      }>("POST", "/agent/test", body),
+  },
   auth: {
     status: () => request<AuthStatus>("GET", "/auth/status"),
     setup: (username: string, password: string) =>

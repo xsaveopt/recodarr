@@ -117,6 +117,7 @@ Everything else (qBit, *arr, profiles, mappings, window, etc.) lives in SQLite â
 | `TZ` | container default | Standard tz name (e.g. `Europe/Amsterdam`). Affects log timestamps and the encoding-window check. |
 | `RECODARR_METRICS_TOKEN` | unset | If set, `/metrics` requires `Authorization: Bearer <token>`. |
 | `RECODARR_TRUST_PROXY` | unset | Set to `1` only when behind a reverse proxy you control â€” enables `X-Forwarded-For` for per-IP login throttling. **Never set on a directly-exposed deployment.** |
+| `RECODARR_MODE` | `server` | Set to `agent` to run the same binary as a remote encode worker. See [`docs/remote-agent.md`](docs/remote-agent.md) for the `RECODARR_AGENT_*` env vars that go with it. |
 
 ## CLI
 

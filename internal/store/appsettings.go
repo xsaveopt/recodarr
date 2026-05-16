@@ -34,6 +34,15 @@ type AppSettings struct {
 	LogMaxAgeDays    int
 	LogMaxBackups    int
 	LogCompress      bool
+
+	// Remote encode agent. When AgentEnabled is true and AgentURL is set,
+	// the encode dispatcher routes jobs to the agent. AgentFallbackLocal
+	// controls what happens when the agent is unreachable (default true:
+	// degrade gracefully to local encoding).
+	AgentEnabled       bool
+	AgentURL           string
+	AgentToken         string // write-only at the API layer (hasAgentToken)
+	AgentFallbackLocal bool
 }
 
 // settings table keys — the only place these magic strings should appear.
@@ -56,6 +65,11 @@ const (
 	keyLogMaxAgeDays     = "log_max_age_days"
 	keyLogMaxBackups     = "log_max_backups"
 	keyLogCompress       = "log_compress"
+
+	keyAgentEnabled       = "agent_enabled"
+	keyAgentURL           = "agent_url"
+	keyAgentToken         = "agent_token"
+	keyAgentFallbackLocal = "agent_fallback_local"
 )
 
 // MaxParallelEncodesCap is the absolute hard limit on concurrent encodes,
@@ -77,6 +91,7 @@ func (s *Store) LoadAppSettings(ctx context.Context) (AppSettings, error) {
 		LogMaxSizeMB:          50,
 		LogMaxAgeDays:         30,
 		LogMaxBackups:         5,
+		AgentFallbackLocal:    true,
 	}
 	all, err := s.GetAllSettings(ctx)
 	if err != nil {
@@ -139,6 +154,14 @@ func (s *Store) LoadAppSettings(ctx context.Context) (AppSettings, error) {
 	}
 	if v, ok := all[keyLogCompress]; ok {
 		cfg.LogCompress = v == "true"
+	}
+	if v, ok := all[keyAgentEnabled]; ok {
+		cfg.AgentEnabled = v == "true"
+	}
+	cfg.AgentURL = strings.TrimSpace(all[keyAgentURL])
+	cfg.AgentToken = all[keyAgentToken]
+	if v, ok := all[keyAgentFallbackLocal]; ok {
+		cfg.AgentFallbackLocal = v == "true"
 	}
 	return cfg, nil
 }

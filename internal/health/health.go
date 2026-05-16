@@ -17,6 +17,7 @@ import (
 
 	"log/slog"
 
+	"github.com/sratabix/recodarr/internal/agent"
 	"github.com/sratabix/recodarr/internal/arr"
 	"github.com/sratabix/recodarr/internal/handbrake"
 	"github.com/sratabix/recodarr/internal/notify"
@@ -75,6 +76,20 @@ type Checker struct {
 	// prev is the issue set from the previous tick, keyed by issueKey. Used
 	// to compute opened/resolved transitions for notifications.
 	prev map[string]Issue
+	// bindAgent, when set, is invoked at the end of every probe with the
+	// agent client (when reachable) or nil (when not). main wires this so
+	// the job worker's dispatcher can swap between local and remote
+	// encoding live.
+	bindAgent func(*agent.Client)
+}
+
+// SetAgentBinder registers a callback fired on each probe tick. The callback
+// receives a non-nil *agent.Client when the configured remote agent is
+// reachable, or nil when it isn't. Pass nil to detach.
+func (c *Checker) SetAgentBinder(fn func(*agent.Client)) {
+	c.mu.Lock()
+	c.bindAgent = fn
+	c.mu.Unlock()
 }
 
 func New(st *store.Store) *Checker { return &Checker{st: st, prev: map[string]Issue{}} }
@@ -252,6 +267,49 @@ func (c *Checker) probe(ctx context.Context) Snapshot {
 	for r := range results {
 		if r.issue != nil {
 			issues = append(issues, *r.issue)
+		}
+	}
+
+	// Remote agent probe. The dispatcher rebind happens after the probe
+	// resolves (whether reachable or not) so a failed agent immediately falls
+	// back to local encodes (if the operator opted in).
+	cfg, _ := c.st.LoadAppSettings(ctx)
+	var agentClient *agent.Client
+	if cfg.AgentEnabled && cfg.AgentURL != "" && cfg.AgentToken != "" {
+		pctx, cancel := context.WithTimeout(ctx, probeTimeout)
+		client := agent.NewClient(cfg.AgentURL, cfg.AgentToken)
+		if _, err := client.Ping(pctx); err != nil {
+			issues = append(issues, Issue{
+				Level:  LevelError,
+				Source: "agent",
+				Title:  fmt.Sprintf("Remote agent %s: unreachable", cfg.AgentURL),
+				Detail: err.Error(),
+			})
+		} else {
+			agentClient = client
+		}
+		cancel()
+	} else if cfg.AgentEnabled {
+		issues = append(issues, Issue{
+			Level:  LevelWarn,
+			Source: "agent",
+			Title:  "Remote agent enabled but URL or token missing",
+			Detail: "Add both in Settings → Remote Agent, or disable the toggle.",
+		})
+	}
+	c.mu.Lock()
+	bind := c.bindAgent
+	c.mu.Unlock()
+	if bind != nil {
+		switch {
+		case agentClient != nil:
+			bind(agentClient)
+		case cfg.AgentEnabled && !cfg.AgentFallbackLocal:
+			// Operator has explicitly disabled local fallback; keep the
+			// previously-bound client so the next encode attempt fails with
+			// a clear remote error rather than silently going local.
+		default:
+			bind(nil)
 		}
 	}
 

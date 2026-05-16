@@ -82,6 +82,33 @@ type Worker struct {
 	// penalized in the retry budget. Entries are consumed by encodeOne's
 	// cancellation branch.
 	requeueOnCancel map[int64]struct{}
+	// remoteEncoder, when non-nil, replaces handbrake.Run for the actual
+	// encode step. The health checker swaps it in/out based on the
+	// configured agent's reachability so a flaky remote falls back to local
+	// (when agent_fallback_local is true) without restarting the worker.
+	remoteEncoder RemoteEncoder
+}
+
+// RemoteEncoder is the minimal surface area encodeOne needs from a remote
+// encode agent client. internal/agent.Client implements it; tests can
+// substitute their own.
+type RemoteEncoder interface {
+	Encode(ctx context.Context, sourcePath string, s handbrake.Settings, onProgress func(handbrake.Progress)) (handbrake.RunResult, error)
+}
+
+// SetRemoteEncoder swaps the active remote encoder. Pass nil to fall back to
+// local handbrake.Run. Safe to call from any goroutine; the next encode tick
+// reads the new value.
+func (w *Worker) SetRemoteEncoder(r RemoteEncoder) {
+	w.mu.Lock()
+	w.remoteEncoder = r
+	w.mu.Unlock()
+}
+
+func (w *Worker) getRemoteEncoder() RemoteEncoder {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.remoteEncoder
 }
 
 func NewWorker(s *store.Store) *Worker {
@@ -551,7 +578,7 @@ func (w *Worker) encodeOne(encCtx, parentCtx context.Context, j store.JobRow) {
 			fmt.Fprintf(&combinedLog, "\n--- retry %d (CRF %d) ---\n", attempt-1, currentQuality)
 			slog.Debug("size-guard retry", "id", j.ID, "attempt", attempt, "quality", currentQuality)
 		}
-		lastResult, lastErr = handbrake.Run(encCtx, j.FilePath, handbrake.Settings{
+		settings := handbrake.Settings{
 			Encoder:         profile.Encoder,
 			EncoderPreset:   profile.EncoderPreset,
 			EncoderProfile:  profile.EncoderProfile,
@@ -569,14 +596,35 @@ func (w *Worker) encodeOne(encCtx, parentCtx context.Context, j store.JobRow) {
 			ExtraArgs:       profile.ExtraArgs,
 			Framerate:       profile.Framerate,
 			NoCommit:        noCommit,
-		}, hbSink, onProgress)
+		}
+		// Branch local vs. remote. The remote agent always returns the
+		// encoded bytes in a sibling temp file (mirroring NoCommit=true), so
+		// the size-guard branch below using lastResult.TempPath works
+		// identically regardless of where the encode ran. The handbrake log
+		// for failures is also returned via RunResult.Log, so the dashboard's
+		// failure UI doesn't have to branch either.
+		if remote := w.getRemoteEncoder(); remote != nil {
+			// Remote always behaves as NoCommit — the worker performs the
+			// Commit locally after download.
+			settings.NoCommit = true
+			lastResult, lastErr = remote.Encode(encCtx, j.FilePath, settings, onProgress)
+		} else {
+			lastResult, lastErr = handbrake.Run(encCtx, j.FilePath, settings, hbSink, onProgress)
+		}
 		combinedLog.WriteString(lastResult.Log)
 
 		if lastErr != nil {
 			break
 		}
 		if guard == "off" {
-			// handbrake.Run already committed the rename. Done.
+			// Local handbrake.Run commits the rename itself. The remote
+			// encoder always leaves the result at TempPath (regardless of
+			// settings.NoCommit) so we have to commit here.
+			if lastResult.TempPath != "" {
+				if err := handbrake.Commit(lastResult.TempPath, j.FilePath); err != nil {
+					lastErr = err
+				}
+			}
 			break
 		}
 

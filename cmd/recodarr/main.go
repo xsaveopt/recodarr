@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	agentpkg "github.com/sratabix/recodarr/internal/agent"
 	"github.com/sratabix/recodarr/internal/api"
 	"github.com/sratabix/recodarr/internal/arr"
 	"github.com/sratabix/recodarr/internal/auth"
@@ -32,22 +33,39 @@ func main() {
 	}
 }
 
-// run hosts the long-lived server. Returning errors instead of calling
-// os.Exit ourselves lets defers (log flush, db close) run before exit.
+// run dispatches on RECODARR_MODE. The default is the full server (UI + DB +
+// *arr + worker pump); "agent" runs a stripped-down HTTP service that accepts
+// encode jobs from a remote Recodarr server.
 func run() error {
-	dataDir := envOr("RECODARR_DATA_DIR", "/data")
-	addr := envOr("RECODARR_ADDR", ":8080")
-
+	// CLI subcommands take precedence over mode (reset-admin always means the
+	// server's admin table, not anything agent-related).
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "reset-admin":
-			runResetAdmin(dataDir)
+			runResetAdmin(envOr("RECODARR_DATA_DIR", "/data"))
 			return nil
 		case "-h", "--help", "help":
 			printHelp()
 			return nil
 		}
 	}
+
+	switch strings.ToLower(envOr("RECODARR_MODE", "server")) {
+	case "server":
+		return runServer()
+	case "agent":
+		return runAgent()
+	default:
+		return fmt.Errorf("unknown RECODARR_MODE=%q (expected: server, agent)", os.Getenv("RECODARR_MODE"))
+	}
+}
+
+// runServer hosts the long-lived primary process: SPA, *arr webhooks, worker
+// pump, health checker, the lot. Returning errors instead of calling
+// os.Exit ourselves lets defers (log flush, db close) run before exit.
+func runServer() error {
+	dataDir := envOr("RECODARR_DATA_DIR", "/data")
+	addr := envOr("RECODARR_ADDR", ":8080")
 
 	// Open the store first so logging can pick up the user's persisted
 	// rotation/level settings before we start writing rotated files. Goose's
@@ -102,6 +120,15 @@ func run() error {
 	go worker.Run(ctx)
 
 	hc := health.New(st)
+	// Health checker drives the live local/remote dispatcher swap. nil means
+	// "no reachable agent" — the worker falls back to local handbrake.Run.
+	hc.SetAgentBinder(func(c *agentpkg.Client) {
+		if c == nil {
+			worker.SetRemoteEncoder(nil)
+			return
+		}
+		worker.SetRemoteEncoder(c)
+	})
 	go hc.Run(ctx)
 
 	srv := &http.Server{

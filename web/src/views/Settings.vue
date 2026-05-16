@@ -12,6 +12,7 @@ import MappingsPanel from "@/components/MappingsPanel.vue";
 import WorkerPanel from "@/components/WorkerPanel.vue";
 import NotificationsPanel from "@/components/NotificationsPanel.vue";
 import LogsPanel from "@/components/LogsPanel.vue";
+import AgentPanel from "@/components/AgentPanel.vue";
 </script>
 
 <template>
@@ -29,6 +30,7 @@ import LogsPanel from "@/components/LogsPanel.vue";
         <Tab value="worker">Worker</Tab>
         <Tab value="notifications">Notifications</Tab>
         <Tab value="logs">Logs</Tab>
+        <Tab value="agent">Remote Agent</Tab>
       </TabList>
       <TabPanels>
         <TabPanel value="arr"><ArrInstancesPanel /></TabPanel>
@@ -38,6 +40,7 @@ import LogsPanel from "@/components/LogsPanel.vue";
         <TabPanel value="worker"><WorkerPanel /></TabPanel>
         <TabPanel value="notifications"><NotificationsPanel /></TabPanel>
         <TabPanel value="logs"><LogsPanel /></TabPanel>
+        <TabPanel value="agent"><AgentPanel /></TabPanel>
       </TabPanels>
     </Tabs>
   </section>

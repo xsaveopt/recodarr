@@ -191,5 +191,10 @@ export interface AppSettings {
   log_max_age_days?: string;
   log_max_backups?: string;
   log_compress?: string;
+  agent_enabled?: string;
+  agent_url?: string;
+  agent_token?: string;
+  agent_fallback_local?: string;
+  hasAgentToken?: string;
   [key: string]: string | undefined;
 }

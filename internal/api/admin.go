@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/sratabix/recodarr/internal/agent"
 	"github.com/sratabix/recodarr/internal/handbrake"
 	"github.com/sratabix/recodarr/internal/health"
 	"github.com/sratabix/recodarr/internal/job"
@@ -241,6 +242,8 @@ func registerAdminRoutes(r chi.Router, st *store.Store, w workerClient, hc *heal
 	r.Get("/worker/status", workerStatus(w, st))
 	r.Post("/worker/pause", workerSetPaused(w))
 
+	r.Post("/agent/test", testAgent(st))
+
 	r.Get("/jobs", listJobs(st))
 	r.Post("/jobs/retry-failed", retryAllFailed(st))
 	r.Post("/jobs/{id}/retry", retryJob(st))
@@ -257,6 +260,15 @@ func getSettings(st *store.Store) http.HandlerFunc {
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+		// Write-only secrets follow the same pattern as webhook_secret / qbit
+		// password / *arr api_key: strip from response, emit a boolean
+		// presence flag so the UI can show "(stored, leave blank to keep)".
+		if tok, ok := m["agent_token"]; ok {
+			delete(m, "agent_token")
+			if tok != "" {
+				m["hasAgentToken"] = "true"
+			}
 		}
 		writeJSON(w, http.StatusOK, m)
 	}
@@ -281,6 +293,27 @@ func putSettings(st *store.Store, lls LogLevelSetter) http.HandlerFunc {
 		if v, ok := m["log_rotate_enabled"]; ok && v != "true" && v != "false" {
 			http.Error(w, "log_rotate_enabled: expected 'true' or 'false'", http.StatusBadRequest)
 			return
+		}
+		for _, k := range []string{"agent_enabled", "agent_fallback_local"} {
+			if v, ok := m[k]; ok && v != "true" && v != "false" {
+				http.Error(w, k+": expected 'true' or 'false'", http.StatusBadRequest)
+				return
+			}
+		}
+		if v, ok := m["agent_url"]; ok && v != "" {
+			u := strings.TrimSpace(v)
+			if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
+				http.Error(w, "agent_url: must start with http:// or https://", http.StatusBadRequest)
+				return
+			}
+			m["agent_url"] = strings.TrimRight(u, "/")
+		}
+		// Blank agent_token means "keep what's stored" — drop from the write
+		// set so we don't clobber. To explicitly clear, send a sentinel like
+		// "clear" (intentionally undocumented; user can clear via the UI's
+		// disable toggle which sets agent_enabled=false).
+		if v, ok := m["agent_token"]; ok && strings.TrimSpace(v) == "" {
+			delete(m, "agent_token")
 		}
 		for _, k := range []string{"log_max_size_mb", "log_max_age_days", "log_max_backups"} {
 			if v, ok := m[k]; ok {
@@ -1145,5 +1178,56 @@ func deleteTerminalJobs(st *store.Store) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]int64{"deleted": n})
+	}
+}
+
+// testAgent dials the configured remote agent server-side so the SPA never
+// has to handle the bearer token. Accepts an optional inline payload to test
+// values the user hasn't saved yet (typical "Test connection" UX).
+func testAgent(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			URL   string `json:"url"`
+			Token string `json:"token"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body) // empty body is fine; fall back to stored
+
+		url := strings.TrimSpace(body.URL)
+		token := body.Token
+		if url == "" || token == "" {
+			cfg, err := st.LoadAppSettings(r.Context())
+			if err != nil {
+				writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
+				return
+			}
+			if url == "" {
+				url = cfg.AgentURL
+			}
+			if token == "" {
+				token = cfg.AgentToken
+			}
+		}
+		if url == "" {
+			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "no agent URL configured"})
+			return
+		}
+		if token == "" {
+			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "no agent token configured"})
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
+		defer cancel()
+		hs, err := agent.NewClient(url, token).Ping(ctx)
+		if err != nil {
+			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":      true,
+			"version": hs.Version,
+			"hb":      hs.HandbrakeVersion,
+			"slots":   hs.SlotsMax,
+			"active":  hs.JobsActive,
+		})
 	}
 }
