@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/sratabix/recodarr/internal/handbrake"
+	"github.com/sratabix/recodarr/internal/health"
 	"github.com/sratabix/recodarr/internal/job"
 	"github.com/sratabix/recodarr/internal/qbit"
 	"github.com/sratabix/recodarr/internal/arr"
@@ -157,13 +158,19 @@ type statsDTO struct {
 	TotalSavedBytes int64 `json:"totalSavedBytes"`
 }
 
-func registerAdminRoutes(r chi.Router, st *store.Store, w workerClient) {
+func registerAdminRoutes(r chi.Router, st *store.Store, w workerClient, hc *health.Checker) {
 	r.Get("/handbrake/caps", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, handbrake.QueryCaps())
 	})
 
 	r.Get("/debug", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, buildDebugInfo())
+	})
+
+	// Lightweight health snapshot for the dashboard: external service
+	// reachability, missing-config warnings. Cached for ~30s in the checker.
+	r.Get("/status", func(rw http.ResponseWriter, r *http.Request) {
+		writeJSON(rw, http.StatusOK, hc.Snapshot(r.Context()))
 	})
 
 	r.Get("/stats", func(rw http.ResponseWriter, r *http.Request) {

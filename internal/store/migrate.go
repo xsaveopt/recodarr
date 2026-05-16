@@ -171,7 +171,7 @@ func (s *Store) tableColumns(table string) (map[string]struct{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := map[string]struct{}{}
 	for rows.Next() {
 		var cid int

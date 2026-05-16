@@ -78,6 +78,59 @@ func Send(ctx context.Context, st *store.Store, title, status, filePath string, 
 	slog.Info("notification sent", "status", status, "title", title, "httpStatus", resp.StatusCode)
 }
 
+// SendHealth fires a notification for a health issue transition. transition is
+// "opened" when an issue first appears or "resolved" when it clears. The
+// caller is expected to dedupe; this function fires every call unless the user
+// has disabled NotifyOnHealth.
+func SendHealth(ctx context.Context, st *store.Store, source, title, detail, level, transition string) {
+	cfg, err := st.LoadAppSettings(ctx)
+	if err != nil {
+		slog.Warn("notify: load settings", "err", err)
+		return
+	}
+	if cfg.NotifyURL == "" || !cfg.NotifyOnHealth {
+		return
+	}
+
+	var msg string
+	switch transition {
+	case "opened":
+		msg = title
+		if detail != "" {
+			msg = title + " — " + detail
+		}
+	case "resolved":
+		msg = "Resolved: " + title
+	default:
+		return
+	}
+
+	payload := map[string]any{
+		"title":      "Recodarr",
+		"message":    msg,
+		"status":     "health",
+		"source":     source,
+		"level":      level,
+		"transition": transition,
+	}
+	body, _ := json.Marshal(payload)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", cfg.NotifyURL, bytes.NewReader(body))
+	if err != nil {
+		slog.Warn("notify: create request", "err", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := notifyClient.Do(req)
+	if err != nil {
+		slog.Warn("notify: send", "err", err)
+		return
+	}
+	_ = resp.Body.Close()
+	slog.Info("health notification sent", "source", source, "transition", transition, "httpStatus", resp.StatusCode)
+}
+
 func formatBytes(n int64) string {
 	if n < 1024 {
 		return fmt.Sprintf("%d B", n)

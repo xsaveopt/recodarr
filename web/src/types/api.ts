@@ -161,6 +161,21 @@ export interface JobStats {
   totalSavedBytes: number;
 }
 
+export type HealthLevel = "error" | "warn";
+
+export interface HealthIssue {
+  level: HealthLevel;
+  source: string;
+  title: string;
+  detail?: string;
+}
+
+export interface HealthSnapshot {
+  ok: boolean;
+  issues: HealthIssue[];
+  checkedAt: string;
+}
+
 export interface AppSettings {
   worker_interval_seconds?: string;
   max_parallel_encodes?: string;
@@ -169,5 +184,6 @@ export interface AppSettings {
   notify_url?: string;
   notify_on_done?: string;
   notify_on_fail?: string;
+  notify_on_health?: string;
   [key: string]: string | undefined;
 }

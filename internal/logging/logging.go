@@ -290,11 +290,12 @@ func (t *LoggedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return resp, err
 	}
 	attrs = append(attrs, "status", resp.StatusCode)
-	if resp.StatusCode >= 500 {
+	switch {
+	case resp.StatusCode >= 500:
 		t.Logger.Warn("outbound http 5xx", attrs...)
-	} else if resp.StatusCode >= 400 {
+	case resp.StatusCode >= 400:
 		t.Logger.Info("outbound http 4xx", attrs...)
-	} else {
+	default:
 		t.Logger.Info("outbound http", attrs...)
 	}
 

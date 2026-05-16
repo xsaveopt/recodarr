@@ -20,6 +20,7 @@ type AppSettings struct {
 	NotifyURL             string
 	NotifyOnDone          bool // default true
 	NotifyOnFail          bool // default true
+	NotifyOnHealth        bool // default true; fire on new and resolved health issues
 }
 
 // settings table keys — the only place these magic strings should appear.
@@ -34,6 +35,7 @@ const (
 	keyNotifyURL             = "notify_url"
 	keyNotifyOnDone          = "notify_on_done"
 	keyNotifyOnFail          = "notify_on_fail"
+	keyNotifyOnHealth        = "notify_on_health"
 )
 
 // MaxParallelEncodesCap is the absolute hard limit on concurrent encodes,
@@ -49,6 +51,7 @@ func (s *Store) LoadAppSettings(ctx context.Context) (AppSettings, error) {
 		MaxParallelEncodes:    1,
 		NotifyOnDone:          true,
 		NotifyOnFail:          true,
+		NotifyOnHealth:        true,
 	}
 	all, err := s.GetAllSettings(ctx)
 	if err != nil {
@@ -81,6 +84,9 @@ func (s *Store) LoadAppSettings(ctx context.Context) (AppSettings, error) {
 	}
 	if v, ok := all[keyNotifyOnFail]; ok {
 		cfg.NotifyOnFail = v == "true"
+	}
+	if v, ok := all[keyNotifyOnHealth]; ok {
+		cfg.NotifyOnHealth = v == "true"
 	}
 	return cfg, nil
 }

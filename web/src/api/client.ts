@@ -3,6 +3,7 @@ import type {
   ArrInstance,
   DebugInfo,
   HbCaps,
+  HealthSnapshot,
   InstanceTag,
   Job,
   JobStats,
@@ -50,6 +51,9 @@ export const api = {
   },
   stats: {
     get: () => request<JobStats>("GET", "/stats"),
+  },
+  status: {
+    get: () => request<HealthSnapshot>("GET", "/status"),
   },
   settings: {
     get: () => request<AppSettings>("GET", "/settings"),

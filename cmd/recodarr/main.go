@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"github.com/sratabix/recodarr/internal/arr"
 	"github.com/sratabix/recodarr/internal/auth"
 	"github.com/sratabix/recodarr/internal/handbrake"
+	"github.com/sratabix/recodarr/internal/health"
 	"github.com/sratabix/recodarr/internal/job"
 	"github.com/sratabix/recodarr/internal/logging"
 	"github.com/sratabix/recodarr/internal/qbit"
@@ -24,6 +26,15 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		slog.Error("fatal", "err", err)
+		os.Exit(1)
+	}
+}
+
+// run hosts the long-lived server. Returning errors instead of calling
+// os.Exit ourselves lets defers (log flush, db close) run before exit.
+func run() error {
 	dataDir := envOr("RECODARR_DATA_DIR", "/data")
 	addr := envOr("RECODARR_ADDR", ":8080")
 
@@ -31,10 +42,10 @@ func main() {
 		switch os.Args[1] {
 		case "reset-admin":
 			runResetAdmin(dataDir)
-			return
+			return nil
 		case "-h", "--help", "help":
 			printHelp()
-			return
+			return nil
 		}
 	}
 
@@ -43,10 +54,7 @@ func main() {
 		AppLevel: slog.LevelInfo,
 	})
 	if err != nil {
-		// Pre-Setup error: slog.Default is still the bootstrap JSON handler,
-		// which is fine for this one-shot failure path.
-		slog.Error("logging setup", "err", err)
-		os.Exit(1)
+		return fmt.Errorf("logging setup: %w", err)
 	}
 	defer sinks.Close()
 	logger := sinks.App
@@ -58,8 +66,7 @@ func main() {
 
 	st, err := store.Open(dataDir + "/recodarr.db")
 	if err != nil {
-		logger.Error("open store", "err", err)
-		os.Exit(1)
+		return fmt.Errorf("open store: %w", err)
 	}
 	defer func() { _ = st.Close() }()
 
@@ -83,9 +90,12 @@ func main() {
 	worker.HandbrakeWriterFor = sinks.HandbrakeFor
 	go worker.Run(ctx)
 
+	hc := health.New(st)
+	go hc.Run(ctx)
+
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           api.NewRouter(st, worker, web.Assets(), sinks.Access),
+		Handler:           api.NewRouter(st, worker, hc, web.Assets(), sinks.Access),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -103,6 +113,7 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 	_ = srv.Shutdown(shutdownCtx)
+	return nil
 }
 
 // recoverOrphanEncodes resets any 'encoding' jobs left over from a previous crash and

@@ -5,12 +5,13 @@ import { RouterLink } from "vue-router";
 import { api } from "@/api/client";
 import { useEncodeProgress } from "@/composables/useEncodeProgress";
 import { useNotify } from "@/composables/useNotify";
-import type { Job, JobStats, JobStatus, WorkerStatus } from "@/types/api";
+import type { HealthSnapshot, Job, JobStats, JobStatus, WorkerStatus } from "@/types/api";
 
 const notify = useNotify();
 const stats = ref<JobStats | null>(null);
 const recentJobs = ref<Job[]>([]);
 const workerStatus = ref<WorkerStatus | null>(null);
+const health = ref<HealthSnapshot | null>(null);
 let timer: number | null = null;
 
 const { progressByJob, prune } = useEncodeProgress({
@@ -72,13 +73,15 @@ async function togglePause() {
 
 async function load() {
   const res = await notify.tryRun(
-    () => Promise.all([api.stats.get(), api.jobs.list(), api.worker.status()]),
+    () =>
+      Promise.all([api.stats.get(), api.jobs.list(), api.worker.status(), api.status.get()]),
     "Couldn't load dashboard",
   );
   if (res) {
     stats.value = res[0];
     recentJobs.value = res[1].slice(0, 12);
     workerStatus.value = res[2];
+    health.value = res[3];
     prune(res[2].encodingJobIds);
   }
 }
@@ -134,6 +137,26 @@ onUnmounted(() => {
 
 <template>
   <div class="dash">
+    <!-- Health issues — shown only when something is wrong -->
+    <section v-if="health && health.issues.length" class="issues">
+      <article
+        v-for="(iss, idx) in health.issues"
+        :key="idx"
+        class="issue"
+        :class="`issue-${iss.level}`"
+      >
+        <i
+          class="pi issue-icon"
+          :class="iss.level === 'error' ? 'pi-exclamation-circle' : 'pi-info-circle'"
+        ></i>
+        <div class="issue-body">
+          <div class="issue-title">{{ iss.title }}</div>
+          <div v-if="iss.detail" class="issue-detail">{{ iss.detail }}</div>
+        </div>
+        <span class="issue-source">{{ iss.source }}</span>
+      </article>
+    </section>
+
     <!-- Status strip: worker + window -->
     <div v-if="workerStatus" class="status-strip">
       <span
@@ -288,6 +311,66 @@ onUnmounted(() => {
 }
 .dim {
   color: var(--rc-faint);
+}
+
+/* Health issues */
+.issues {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.issue {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--rc-border);
+  border-radius: var(--rc-r-md);
+  background: var(--rc-surface);
+  font-size: 0.85rem;
+}
+.issue-error {
+  border-color: color-mix(in srgb, var(--rc-danger) 35%, var(--rc-border));
+  background: var(--rc-danger-soft, color-mix(in srgb, var(--rc-danger) 8%, var(--rc-surface)));
+}
+.issue-warn {
+  border-color: color-mix(in srgb, var(--rc-warn) 35%, var(--rc-border));
+  background: var(--rc-warn-soft);
+}
+.issue-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  font-size: 1rem;
+}
+.issue-error .issue-icon {
+  color: var(--rc-danger);
+}
+.issue-warn .issue-icon {
+  color: var(--rc-warn);
+}
+.issue-body {
+  flex: 1;
+  min-width: 0;
+}
+.issue-title {
+  font-weight: 600;
+  color: var(--rc-fg);
+}
+.issue-detail {
+  margin-top: 0.2rem;
+  color: var(--rc-fg-2);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+.issue-source {
+  font-size: 0.7rem;
+  color: var(--rc-muted);
+  font-family: var(--rc-mono, monospace);
+  text-transform: lowercase;
+  flex-shrink: 0;
+  padding: 0.1rem 0.4rem;
+  border-radius: var(--rc-r-sm);
+  background: color-mix(in srgb, var(--rc-fg) 6%, transparent);
 }
 
 /* Status strip */

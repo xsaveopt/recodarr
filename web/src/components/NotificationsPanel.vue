@@ -12,6 +12,7 @@ const notify = useNotify();
 const notifyUrl = ref<string>("");
 const notifyOnDone = ref<boolean>(true);
 const notifyOnFail = ref<boolean>(true);
+const notifyOnHealth = ref<boolean>(true);
 const testing = ref(false);
 
 async function load() {
@@ -20,6 +21,7 @@ async function load() {
     notifyUrl.value = s.notify_url ?? "";
     notifyOnDone.value = s.notify_on_done !== "false";
     notifyOnFail.value = s.notify_on_fail !== "false";
+    notifyOnHealth.value = s.notify_on_health !== "false";
   }
 }
 
@@ -28,6 +30,7 @@ async function save() {
     notify_url: notifyUrl.value.trim(),
     notify_on_done: notifyOnDone.value ? "true" : "false",
     notify_on_fail: notifyOnFail.value ? "true" : "false",
+    notify_on_health: notifyOnHealth.value ? "true" : "false",
   };
   const ok = await notify.tryRun(() => api.settings.put(updates), "Couldn't save settings");
   if (ok !== undefined) notify.success("Notification settings saved");
@@ -79,6 +82,10 @@ onMounted(load);
       <label class="row">
         <span>Notify on fail</span>
         <ToggleSwitch v-model="notifyOnFail" />
+      </label>
+      <label class="row">
+        <span>Notify on health issues</span>
+        <ToggleSwitch v-model="notifyOnHealth" />
       </label>
     </div>
 
