@@ -18,6 +18,7 @@ Auto re-encodes downloaded series and movies via HandBrake. Sits alongside Sonar
 - [Image tags](#image-tags)
 - [Environment variables](#environment-variables)
 - [CLI](#cli)
+- [License](#license)
 
 ## How it works
 
@@ -174,3 +175,7 @@ recodarr               start the server
 recodarr reset-admin   wipe the admin user, then visit the app to set up again
 recodarr help          show usage
 ```
+
+## License
+
+[GPL-2.0](LICENSE).
