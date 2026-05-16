@@ -8,24 +8,30 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
-// requestLogger logs every HTTP request through slog so they show up next to
-// the rest of the application logs (and in `docker logs`). Wraps the response
-// writer to capture the actual status code we sent back.
-func requestLogger(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
-		start := time.Now()
-		next.ServeHTTP(ww, r)
-		slog.Info("http",
-			"method", r.Method,
-			"path", r.URL.Path,
-			"status", ww.Status(),
-			"bytes", ww.BytesWritten(),
-			"dur_ms", time.Since(start).Milliseconds(),
-			"remote", r.RemoteAddr,
-			"ua", r.UserAgent(),
-		)
-	})
+// requestLogger logs every HTTP request to the provided access logger (which
+// the main wiring points at access.log). Wraps the response writer to capture
+// the actual status code we sent back. Stays out of the app/stdout log so
+// `docker logs` doesn't drown in per-request noise.
+func requestLogger(access *slog.Logger) func(http.Handler) http.Handler {
+	if access == nil {
+		access = slog.Default()
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+			start := time.Now()
+			next.ServeHTTP(ww, r)
+			access.Info("http",
+				"method", r.Method,
+				"path", r.URL.Path,
+				"status", ww.Status(),
+				"bytes", ww.BytesWritten(),
+				"dur_ms", time.Since(start).Milliseconds(),
+				"remote", r.RemoteAddr,
+				"ua", r.UserAgent(),
+			)
+		})
+	}
 }
 
 // securityHeaders sets a conservative baseline of security-relevant response headers.

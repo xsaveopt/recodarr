@@ -20,6 +20,12 @@ const (
 	KindRadarr Kind = "radarr"
 )
 
+// HTTPTransport is the http.RoundTripper used by every *arr client created
+// after this is set. Defaults to http.DefaultTransport. The logging package
+// swaps this for an outbound-logging wrapper at startup so Sonarr/Radarr
+// calls land in outbound.log instead of stdout.
+var HTTPTransport http.RoundTripper = http.DefaultTransport
+
 type Client struct {
 	kind    Kind
 	baseURL string
@@ -32,7 +38,7 @@ func New(kind Kind, baseURL, apiKey string) *Client {
 		kind:    kind,
 		baseURL: strings.TrimRight(baseURL, "/"),
 		apiKey:  apiKey,
-		http:    &http.Client{Timeout: 15 * time.Second},
+		http:    &http.Client{Timeout: 15 * time.Second, Transport: HTTPTransport},
 	}
 }
 

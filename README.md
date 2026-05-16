@@ -108,7 +108,15 @@ Setup is non-trivial and varies by vendor — full guides:
 
 ## Environment variables
 
-`RECODARR_ADDR` (default `:8080`), `RECODARR_DATA_DIR` (default `/data`, mount this), `TZ` for log timestamps, `RECODARR_METRICS_TOKEN` (optional, gates `/metrics` behind a bearer token). Everything else lives in SQLite and is managed through the web UI.
+Everything else (qBit, *arr, profiles, mappings, window, etc.) lives in SQLite — set it in the UI.
+
+| Var | Default | Purpose |
+| --- | --- | --- |
+| `RECODARR_DATA_DIR` | `/data` | DB, sessions, and `logs/` live here. Mount as a volume. |
+| `RECODARR_ADDR` | `:8080` | HTTP listen address. |
+| `TZ` | container default | Standard tz name (e.g. `Europe/Amsterdam`). Affects log timestamps and the encoding-window check. |
+| `RECODARR_METRICS_TOKEN` | unset | If set, `/metrics` requires `Authorization: Bearer <token>`. |
+| `RECODARR_TRUST_PROXY` | unset | Set to `1` only when behind a reverse proxy you control — enables `X-Forwarded-For` for per-IP login throttling. **Never set on a directly-exposed deployment.** |
 
 ## CLI
 

@@ -2,6 +2,7 @@ package api
 
 import (
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -16,7 +17,7 @@ import (
 	"github.com/sratabix/recodarr/internal/store"
 )
 
-func NewRouter(st *store.Store, worker *job.Worker, assets fs.FS) http.Handler {
+func NewRouter(st *store.Store, worker *job.Worker, assets fs.FS, access *slog.Logger) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	// Only honor X-Forwarded-For / X-Real-IP when explicitly told there's a trusted
@@ -26,7 +27,7 @@ func NewRouter(st *store.Store, worker *job.Worker, assets fs.FS) http.Handler {
 		r.Use(middleware.RealIP)
 	}
 	r.Use(middleware.Recoverer)
-	r.Use(requestLogger)
+	r.Use(requestLogger(access))
 	r.Use(securityHeaders)
 
 	a := auth.New(st.DB)

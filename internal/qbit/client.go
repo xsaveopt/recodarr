@@ -13,6 +13,12 @@ import (
 	"time"
 )
 
+// HTTPTransport is the http.RoundTripper used by every qBit client created
+// after this is set. Defaults to http.DefaultTransport. The logging package
+// swaps this for an outbound-logging wrapper at startup so qBit calls land
+// in outbound.log instead of stdout.
+var HTTPTransport http.RoundTripper = http.DefaultTransport
+
 type Client struct {
 	baseURL  string
 	username string
@@ -29,7 +35,7 @@ func New(baseURL, username, password string) (*Client, error) {
 		baseURL:  strings.TrimRight(baseURL, "/"),
 		username: username,
 		password: password,
-		http:     &http.Client{Jar: jar, Timeout: 15 * time.Second},
+		http:     &http.Client{Jar: jar, Timeout: 15 * time.Second, Transport: HTTPTransport},
 	}, nil
 }
 

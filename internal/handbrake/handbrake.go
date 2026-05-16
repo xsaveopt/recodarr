@@ -117,10 +117,20 @@ type RunResult struct {
 	Log string // captured combined output (always populated)
 }
 
+// LineSink is an optional destination for HandBrakeCLI's raw stdout/stderr.
+// Callers usually point this at handbrake.log via the logging package; nil
+// (or io.Discard) drops the verbose output. The captured-for-error buffer is
+// independent and always populated.
+type LineSink struct {
+	Stdout io.Writer
+	Stderr io.Writer
+}
+
 // Run encodes input to a temp file in the same directory and atomically renames over input on success.
-// Combined stdout+stderr is always captured; on failure it is included in the returned error.
+// Combined stdout+stderr is always captured into the returned RunResult.Log for the failure path;
+// raw line-by-line output additionally goes to sink (if non-nil) so the caller can route it to a file.
 // onProgress, if non-nil, is called for each parsed progress line — keep it cheap and non-blocking.
-func Run(ctx context.Context, input string, s Settings, onProgress func(Progress)) (RunResult, error) {
+func Run(ctx context.Context, input string, s Settings, sink *LineSink, onProgress func(Progress)) (RunResult, error) {
 	if _, err := os.Stat(input); err != nil {
 		return RunResult{}, fmt.Errorf("stat input: %w", err)
 	}
@@ -169,10 +179,20 @@ func Run(ctx context.Context, input string, s Settings, onProgress func(Progress
 			}
 		}
 	}
+	stdoutMirror := io.Discard
+	stderrMirror := io.Discard
+	if sink != nil {
+		if sink.Stdout != nil {
+			stdoutMirror = sink.Stdout
+		}
+		if sink.Stderr != nil {
+			stderrMirror = sink.Stderr
+		}
+	}
 	outDone := make(chan struct{})
 	errDone := make(chan struct{})
-	go pump(stdoutPipe, os.Stdout, true, outDone)
-	go pump(stderrPipe, os.Stderr, false, errDone)
+	go pump(stdoutPipe, stdoutMirror, true, outDone)
+	go pump(stderrPipe, stderrMirror, false, errDone)
 	<-outDone
 	<-errDone
 	if err := cmd.Wait(); err != nil {

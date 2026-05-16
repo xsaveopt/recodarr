@@ -13,17 +13,17 @@ import (
 	"time"
 
 	"github.com/sratabix/recodarr/internal/api"
+	"github.com/sratabix/recodarr/internal/arr"
 	"github.com/sratabix/recodarr/internal/auth"
 	"github.com/sratabix/recodarr/internal/handbrake"
 	"github.com/sratabix/recodarr/internal/job"
+	"github.com/sratabix/recodarr/internal/logging"
+	"github.com/sratabix/recodarr/internal/qbit"
 	"github.com/sratabix/recodarr/internal/store"
 	"github.com/sratabix/recodarr/web"
 )
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	slog.SetDefault(logger)
-
 	dataDir := envOr("RECODARR_DATA_DIR", "/data")
 	addr := envOr("RECODARR_ADDR", ":8080")
 
@@ -37,6 +37,24 @@ func main() {
 			return
 		}
 	}
+
+	sinks, err := logging.Setup(logging.Options{
+		Dir:      filepath.Join(dataDir, "logs"),
+		AppLevel: slog.LevelInfo,
+	})
+	if err != nil {
+		// Pre-Setup error: slog.Default is still the bootstrap JSON handler,
+		// which is fine for this one-shot failure path.
+		slog.Error("logging setup", "err", err)
+		os.Exit(1)
+	}
+	defer sinks.Close()
+	logger := sinks.App
+
+	// Route outbound HTTP for the *arr and qBit clients through the logging
+	// transport so calls land in outbound.log instead of stdout.
+	qbit.HTTPTransport = logging.OutboundTransport(http.DefaultTransport, sinks.Outbound)
+	arr.HTTPTransport = logging.OutboundTransport(http.DefaultTransport, sinks.Outbound)
 
 	st, err := store.Open(dataDir + "/recodarr.db")
 	if err != nil {
@@ -62,11 +80,12 @@ func main() {
 	recoverOrphanEncodes(ctx, st)
 
 	worker := job.NewWorker(st)
+	worker.HandbrakeWriterFor = sinks.HandbrakeFor
 	go worker.Run(ctx)
 
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           api.NewRouter(st, worker, web.Assets()),
+		Handler:           api.NewRouter(st, worker, web.Assets(), sinks.Access),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

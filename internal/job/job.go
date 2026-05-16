@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -70,6 +71,11 @@ type Worker struct {
 	encoding    map[int64]*activeEncode // jobID → in-flight encode state
 	lastTickAt  time.Time
 	subscribers map[chan ProgressEvent]struct{}
+	// HandbrakeWriterFor, if set, is called per encode to obtain an io.Writer
+	// that receives HandBrakeCLI's raw stdout/stderr. Wired by main.go to
+	// the logging package's handbrake.log sink. Nil means "discard verbose
+	// output", which is fine for tests.
+	HandbrakeWriterFor func(jobID int64) io.Writer
 	// requeueOnCancel marks job ids whose in-flight encode should be re-queued
 	// (back to ready) instead of marked failed when the per-job context is
 	// cancelled. Used by the pause path so a paused mid-encode job isn't
@@ -504,6 +510,11 @@ func (w *Worker) encodeOne(encCtx, parentCtx context.Context, j store.JobRow) {
 	onProgress := func(p handbrake.Progress) {
 		w.broadcast(ProgressEvent{JobID: j.ID, Title: j.Title, Percent: p.Percent, FPS: p.FPS, ETA: p.ETA})
 	}
+	var hbSink *handbrake.LineSink
+	if w.HandbrakeWriterFor != nil {
+		out := w.HandbrakeWriterFor(j.ID)
+		hbSink = &handbrake.LineSink{Stdout: out, Stderr: out}
+	}
 	cfg, _ := w.store.LoadAppSettings(parentCtx)
 
 	// Size-guard policy decides whether to defer the file commit. When 'off'
@@ -558,7 +569,7 @@ func (w *Worker) encodeOne(encCtx, parentCtx context.Context, j store.JobRow) {
 			ExtraArgs:       profile.ExtraArgs,
 			Framerate:       profile.Framerate,
 			NoCommit:        noCommit,
-		}, onProgress)
+		}, hbSink, onProgress)
 		combinedLog.WriteString(lastResult.Log)
 
 		if lastErr != nil {
