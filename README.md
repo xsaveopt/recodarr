@@ -2,6 +2,23 @@
 
 Auto re-encodes downloaded series and movies via HandBrake. Sits alongside Sonarr/Radarr/qBittorrent and re-encodes imported files in place once seeding is done.
 
+> ⚠️ **Local use only.** Recodarr is built for trusted home/LAN networks — alongside your other *arr stack. Don't expose it to the public internet. The security model is single-admin auth + LAN-only assumptions; it has not been hardened against hostile traffic. If you need it accessible from outside, put it behind a VPN (WireGuard, Tailscale) — never directly on a public IP or a vanilla reverse proxy. The remote agent is even more strictly LAN-only: shared bearer token, plain HTTP, no rate limiting.
+
+## Contents
+
+- [How it works](#how-it-works)
+- [First-run setup](#first-run-setup)
+- [docker-compose](#docker-compose)
+- [Wiring it up](#wiring-it-up)
+- [Encoding window](#encoding-window)
+- [Failed jobs](#failed-jobs)
+- [Prometheus metrics](#prometheus-metrics)
+- [GPU acceleration](#gpu-acceleration)
+- [Remote encode agent](#remote-encode-agent)
+- [Image tags](#image-tags)
+- [Environment variables](#environment-variables)
+- [CLI](#cli)
+
 ## How it works
 
 Sonarr or Radarr imports a file and POSTs a webhook to Recodarr. If the item carries a tag that you've mapped to a profile, Recodarr queues a job. Every 30 seconds the worker checks qBittorrent: when the torrent is no longer seeding, the job becomes ready. The worker then runs HandBrakeCLI on the imported library file, writes to a sibling temp file, and atomically renames over the original. Finally it asks \*arr to refresh so the new file size shows up.
@@ -102,6 +119,37 @@ Setup is non-trivial and varies by vendor — full guides:
 - **Intel (QSV + VA-API)** — see [`docs/gpu-intel.md`](docs/gpu-intel.md). `/dev/dri` passthrough, `render` group GID, kernel/driver matrix per generation (Haswell → Battlemage), low-power mode, AV1 hardware encode (Arc and newer).
 - **AMD (VCE via VA-API)** — same `/dev/dri` + `group_add` setup as Intel; use the `vce_*` encoder family. The Intel guide's device-passthrough section applies as-is.
 
+## Remote encode agent
+
+> ⚠️ **LAN only.** The agent protocol is one shared bearer token over plain HTTP. Anyone reaching it can submit arbitrary HandBrake commands and read uploaded files. Run it on a trusted network — never expose it to the public internet.
+
+Recodarr can offload encodes to a second instance of itself running on another host — typically a box with a much beefier GPU than wherever your media library lives. The same binary, same image, started with `RECODARR_MODE=agent`, becomes a stripped-down HTTP service that accepts encode jobs over the network, runs HandBrake locally, and streams the result back. The main Recodarr commits the result in place as if it had encoded locally, so the dashboard, progress, cancel, retry, and *arr refresh all keep working unchanged.
+
+When to use it: your storage server is a low-power NAS, but you have a workstation with an Arc or RTX card sitting idle. When not to: everything's on one host (just bind-mount the media), or your network link is so slow that transfer dominates over encode time.
+
+**Setup in one go** — on the GPU host:
+
+```yaml
+# docker-compose.agent.yml
+services:
+  recodarr-agent:
+    image: ghcr.io/sratabix/recodarr:latest
+    environment:
+      RECODARR_MODE: agent
+      RECODARR_AGENT_TOKEN: ${AGENT_TOKEN:?set this}
+    volumes:
+      - ./agent-data:/data           # no media mount needed
+    ports:
+      - "8090:8090"
+    # Add the GPU passthrough block for your vendor — see GPU guides above.
+```
+
+Generate the token once with `openssl rand -hex 32` and put it in a sibling `.env`. Then in Recodarr's UI: **Settings → Remote Agent**, paste the URL (`http://gpu-host:8090`) and token, toggle **Use remote agent**, save, hit **Test connection**. Once the dashboard's health pill is green, every encode is dispatched to the agent.
+
+If the agent goes offline, Recodarr falls back to local encoding by default (configurable). A failed network upload retries up to 5 times like any other job.
+
+Full reference — protocol, failure modes, bandwidth math, security caveats, all `RECODARR_AGENT_*` env vars — lives in [`docs/remote-agent.md`](docs/remote-agent.md).
+
 ## Image tags
 
 `latest` for the latest stable release. `1`, `1.2`, `1.2.3` to pin to a major, minor, or patch line. Pre-releases like `1.2.3-rc1` are never tagged `latest`. `dev` tracks the tip of the `main` branch (rebuilt on every commit) and is the easiest tag to use for testing without waiting for a release. Per-commit immutable tags are also published as `dev-<sha>`. Images are published to `ghcr.io/sratabix/recodarr` and built for `linux/amd64`.
@@ -117,7 +165,7 @@ Everything else (qBit, *arr, profiles, mappings, window, etc.) lives in SQLite �
 | `TZ` | container default | Standard tz name (e.g. `Europe/Amsterdam`). Affects log timestamps and the encoding-window check. |
 | `RECODARR_METRICS_TOKEN` | unset | If set, `/metrics` requires `Authorization: Bearer <token>`. |
 | `RECODARR_TRUST_PROXY` | unset | Set to `1` only when behind a reverse proxy you control — enables `X-Forwarded-For` for per-IP login throttling. **Never set on a directly-exposed deployment.** |
-| `RECODARR_MODE` | `server` | Set to `agent` to run the same binary as a remote encode worker. See [`docs/remote-agent.md`](docs/remote-agent.md) for the `RECODARR_AGENT_*` env vars that go with it. |
+| `RECODARR_MODE` | `server` | Set to `agent` to run the same binary as a remote encode worker. See [Remote encode agent](#remote-encode-agent) for the full feature; [`docs/remote-agent.md`](docs/remote-agent.md) covers the `RECODARR_AGENT_*` knobs. |
 
 ## CLI
 
