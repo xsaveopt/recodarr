@@ -28,6 +28,11 @@ const profiles = ref<Profile[]>([]);
 const busy = ref<Set<number>>(new Set());
 const selectedJobs = ref<Job[]>([]);
 const bulkBusy = ref(false);
+// Anchor for shift-click range selection. Holds the id of the last checkbox
+// the user toggled WITHOUT shift — shift+click on another row then selects
+// (or deselects) every row between the anchor and the new target on the
+// current page.
+const rangeAnchorId = ref<number | null>(null);
 
 // Statuses the user can pick in the Clear History dialog. Encoding jobs are
 // never deletable from here — cancel them first.
@@ -305,6 +310,40 @@ async function bulkDelete() {
   });
 }
 
+// Shift-click range select: expand selection from rangeAnchorId to ev.data.id
+// (inclusive) on the visible page. Mirrors the typical file-manager pattern —
+// click row, shift-click another, every row in between flips to match.
+function applyRangeSelection(targetId: number, select: boolean) {
+  const anchor = rangeAnchorId.value;
+  if (anchor == null || anchor === targetId) return;
+  const a = jobs.value.findIndex((j) => j.id === anchor);
+  const b = jobs.value.findIndex((j) => j.id === targetId);
+  if (a < 0 || b < 0) return;
+  const [lo, hi] = a < b ? [a, b] : [b, a];
+  const range = jobs.value.slice(lo, hi + 1);
+  const rangeIds = new Set(range.map((j) => j.id));
+  const others = selectedJobs.value.filter((j) => !rangeIds.has(j.id));
+  selectedJobs.value = select ? [...others, ...range] : others;
+}
+
+function onRowSelect(ev: { data: Job; originalEvent: Event }) {
+  const oe = ev.originalEvent as MouseEvent | KeyboardEvent | undefined;
+  if (oe && "shiftKey" in oe && oe.shiftKey) {
+    applyRangeSelection(ev.data.id, true);
+  } else {
+    rangeAnchorId.value = ev.data.id;
+  }
+}
+
+function onRowUnselect(ev: { data: Job; originalEvent: Event }) {
+  const oe = ev.originalEvent as MouseEvent | KeyboardEvent | undefined;
+  if (oe && "shiftKey" in oe && oe.shiftKey) {
+    applyRangeSelection(ev.data.id, false);
+  } else {
+    rangeAnchorId.value = ev.data.id;
+  }
+}
+
 async function bulkSetProfile() {
   const ids = selectedIds.value;
   if (ids.length === 0 || bulkProfileId.value == null) return;
@@ -540,6 +579,8 @@ onUnmounted(() => {
       lazy
       paginator
       dataKey="id"
+      @row-select="onRowSelect"
+      @row-unselect="onRowUnselect"
       :rows="pageSize"
       :first="pageOffset"
       :totalRecords="totalRecords"
