@@ -62,9 +62,12 @@ async function save() {
   if (token.value.trim() !== "") {
     updates.agent_token = token.value.trim();
   }
-  const ok = await notify.tryRun(() => api.settings.put(updates), "Couldn't save settings");
-  if (ok !== undefined) {
-    notify.success("Remote agent settings saved");
+  const ok = await notify.tryAct(
+    () => api.settings.put(updates),
+    "Remote agent settings saved",
+    "Couldn't save settings",
+  );
+  if (ok) {
     token.value = "";
     await load();
   }

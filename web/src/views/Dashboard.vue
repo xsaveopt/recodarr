@@ -26,7 +26,7 @@ const { progressByJob, prune } = useEncodeProgress({
         progress: workerStatus.value.progress.filter((p) => p.jobId !== jobId),
       };
     }
-    void load();
+    void load(true);
   },
 });
 
@@ -71,19 +71,38 @@ async function togglePause() {
   }
 }
 
-async function load() {
-  const res = await notify.tryRun(
-    () =>
-      Promise.all([api.stats.get(), api.jobs.list({ limit: 12 }), api.worker.status(), api.status.get()]),
-    "Couldn't load dashboard",
-  );
-  if (res) {
-    stats.value = res[0];
-    recentJobs.value = res[1].jobs;
-    workerStatus.value = res[2];
-    health.value = res[3];
-    prune(res[2].encodingJobIds);
+// Each call updates its slice of state as soon as it returns, so the page
+// paints progressively instead of blocking on the slowest of the four. Errors
+// from any one call surface as a toast but don't kill the rest. Only the first
+// load shows toasts on failure — background ticks fail silently so a transient
+// blip doesn't spam the user.
+async function loadOne<T>(fn: () => Promise<T>, errMsg: string, silent: boolean): Promise<T | null> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (!silent) notify.error(e, errMsg);
+    return null;
   }
+}
+
+async function load(silent = false) {
+  await Promise.all([
+    loadOne(() => api.stats.get(), "Couldn't load stats", silent).then((r) => {
+      if (r) stats.value = r;
+    }),
+    loadOne(() => api.jobs.list({ limit: 12 }), "Couldn't load recent jobs", silent).then((r) => {
+      if (r) recentJobs.value = r.jobs;
+    }),
+    loadOne(() => api.worker.status(), "Couldn't load worker status", silent).then((r) => {
+      if (r) {
+        workerStatus.value = r;
+        prune(r.encodingJobIds);
+      }
+    }),
+    loadOne(() => api.status.get(), "Couldn't load health", silent).then((r) => {
+      if (r) health.value = r;
+    }),
+  ]);
 }
 
 function relativeTime(iso: string | null): string {
@@ -128,7 +147,7 @@ const isEmpty = computed(() => {
 
 onMounted(() => {
   void load();
-  timer = window.setInterval(load, 10000);
+  timer = window.setInterval(() => void load(true), 10000);
 });
 onUnmounted(() => {
   if (timer != null) window.clearInterval(timer);

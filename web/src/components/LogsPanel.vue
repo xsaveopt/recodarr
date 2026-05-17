@@ -56,8 +56,11 @@ async function save() {
     log_max_backups: String(maxBackups.value),
     log_compress: compress.value ? "true" : "false",
   };
-  const ok = await notify.tryRun(() => api.settings.put(updates), "Couldn't save settings");
-  if (ok !== undefined) notify.success("Log settings saved");
+  await notify.tryAct(
+    () => api.settings.put(updates),
+    "Log settings saved",
+    "Couldn't save settings",
+  );
 }
 
 onMounted(load);

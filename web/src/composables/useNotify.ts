@@ -33,6 +33,28 @@ export function useNotify() {
   }
 
   /**
+   * Run an action that doesn't have a meaningful return value (e.g. settings save).
+   * Shows a success toast on resolve, error toast on reject. Returns true/false so
+   * callers can branch. Use this instead of `tryRun` for `void`-returning APIs —
+   * `tryRun`'s return value can't distinguish "succeeded with no result" from
+   * "failed" when T is void.
+   */
+  async function tryAct(
+    fn: () => Promise<unknown>,
+    successMsg: string,
+    errSummary?: string,
+  ): Promise<boolean> {
+    try {
+      await fn();
+      success(successMsg);
+      return true;
+    } catch (e) {
+      error(e, errSummary);
+      return false;
+    }
+  }
+
+  /**
    * Generic destructive-confirm. Pass `message` to override the default
    * "Delete X? This cannot be undone." line — useful when the destructive
    * action has nuance worth spelling out (e.g. "this only removes the DB row,
@@ -59,5 +81,5 @@ export function useNotify() {
     });
   }
 
-  return { success, error, info, tryRun, confirmDelete };
+  return { success, error, info, tryRun, tryAct, confirmDelete };
 }

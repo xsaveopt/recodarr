@@ -84,8 +84,11 @@ async function save() {
     output_suffix_enabled: suffixEnabled.value ? "true" : "false",
     output_suffix: outputSuffix.value.trim(),
   };
-  const ok = await notify.tryRun(() => api.settings.put(updates), "Couldn't save settings");
-  if (ok !== undefined) notify.success("Worker settings saved");
+  await notify.tryAct(
+    () => api.settings.put(updates),
+    "Worker settings saved",
+    "Couldn't save settings",
+  );
 }
 
 function clearWindow() {

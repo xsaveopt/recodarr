@@ -239,9 +239,9 @@ function remove(id: number) {
       "This removes the queue entry only. The encoded file on disk is NOT touched, and Sonarr/Radarr are not contacted.",
     onAccept: async () => {
       const ok = await withBusy(id, () =>
-        notify.tryRun(() => api.jobs.remove(id), "Couldn't remove"),
+        notify.tryAct(() => api.jobs.remove(id), `Removed job #${id}`, "Couldn't remove"),
       );
-      if (ok !== undefined) jobs.value = jobs.value.filter((x) => x.id !== id);
+      if (ok) jobs.value = jobs.value.filter((x) => x.id !== id);
     },
   });
 }

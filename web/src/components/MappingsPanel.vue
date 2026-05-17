@@ -91,8 +91,12 @@ function remove(m: TagMapping) {
   notify.confirmDelete({
     name: `${m.tagLabel} → ${profileName(m.profileId)}`,
     onAccept: async () => {
-      const ok = await notify.tryRun(() => api.tagMappings.remove(m.id), "Couldn't delete mapping");
-      if (ok !== undefined) {
+      const ok = await notify.tryAct(
+        () => api.tagMappings.remove(m.id),
+        `Deleted mapping for ${m.tagLabel}`,
+        "Couldn't delete mapping",
+      );
+      if (ok) {
         mappings.value = mappings.value.filter((x) => x.id !== m.id);
       }
     },

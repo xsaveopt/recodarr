@@ -322,9 +322,12 @@ function remove(row: Profile) {
   notify.confirmDelete({
     name: row.name,
     onAccept: async () => {
-      const ok = await notify.tryRun(() => api.profiles.remove(row.id), "Couldn't delete profile");
-      if (ok !== undefined) {
-        notify.success(`Deleted profile "${row.name}"`);
+      const ok = await notify.tryAct(
+        () => api.profiles.remove(row.id),
+        `Deleted profile "${row.name}"`,
+        "Couldn't delete profile",
+      );
+      if (ok) {
         await load();
       }
     },

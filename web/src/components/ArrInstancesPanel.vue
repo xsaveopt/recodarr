@@ -108,9 +108,12 @@ function remove(row: ArrInstance) {
   notify.confirmDelete({
     name: row.name,
     onAccept: async () => {
-      const ok = await notify.tryRun(() => api.arr.remove(row.id), "Couldn't delete instance");
-      if (ok !== undefined) {
-        notify.success(`Deleted ${row.name}`);
+      const ok = await notify.tryAct(
+        () => api.arr.remove(row.id),
+        `Deleted ${row.name}`,
+        "Couldn't delete instance",
+      );
+      if (ok) {
         delete testResults.value[row.id];
         persistTests();
         await load();

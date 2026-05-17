@@ -32,8 +32,11 @@ async function save() {
     notify_on_fail: notifyOnFail.value ? "true" : "false",
     notify_on_health: notifyOnHealth.value ? "true" : "false",
   };
-  const ok = await notify.tryRun(() => api.settings.put(updates), "Couldn't save settings");
-  if (ok !== undefined) notify.success("Notification settings saved");
+  await notify.tryAct(
+    () => api.settings.put(updates),
+    "Notification settings saved",
+    "Couldn't save settings",
+  );
 }
 
 async function test() {

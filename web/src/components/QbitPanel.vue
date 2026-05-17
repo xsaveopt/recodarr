@@ -76,8 +76,12 @@ function remove() {
   notify.confirmDelete({
     name: "qBit credentials",
     onAccept: async () => {
-      const ok = await notify.tryRun(() => api.qbit.remove(item.value.id), "Couldn't delete");
-      if (ok !== undefined) {
+      const ok = await notify.tryAct(
+        () => api.qbit.remove(item.value.id),
+        "Deleted qBit credentials",
+        "Couldn't delete",
+      );
+      if (ok) {
         item.value = {
           id: 0,
           name: "qbit",
@@ -86,7 +90,6 @@ function remove() {
           password: "",
           hasPassword: false,
         };
-        notify.success("Deleted qBit credentials");
       }
     },
   });
