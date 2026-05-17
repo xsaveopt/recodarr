@@ -125,6 +125,31 @@ export interface Job {
   finalSize?: number;
 }
 
+export interface JobDebug {
+  jobId: number;
+  status: JobStatus;
+  downloadId: string;
+  downloadIdLength: number;
+  filePath: string;
+  qbit: {
+    configured: boolean;
+    url?: string;
+    reachable: boolean;
+    loginError?: string;
+    lookup?: {
+      found: boolean;
+      hash?: string;
+      name?: string;
+      state?: string;
+      progress?: number;
+      category?: string;
+      savePath?: string;
+    };
+    lookupError?: string;
+  };
+  stalledReason?: string;
+}
+
 export interface WorkerStatus {
   isEncoding: boolean;
   encodingJobId: number; // back-compat: lowest in-flight id, 0 if none

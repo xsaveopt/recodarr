@@ -13,7 +13,7 @@ import ProgressBar from "primevue/progressbar";
 import { api } from "@/api/client";
 import { useEncodeProgress } from "@/composables/useEncodeProgress";
 import { useNotify } from "@/composables/useNotify";
-import type { Job, JobStatus } from "@/types/api";
+import type { Job, JobDebug, JobStatus } from "@/types/api";
 
 const notify = useNotify();
 const { progressByJob } = useEncodeProgress();
@@ -29,6 +29,29 @@ watch(statusFilter, (v) => {
   router.replace({ query: { ...route.query, status: v || undefined } });
 });
 const logJob = ref<Job | null>(null);
+const debugJob = ref<Job | null>(null);
+const debugInfo = ref<JobDebug | null>(null);
+const debugLoading = ref(false);
+const debugError = ref<string | null>(null);
+
+async function openDebug(j: Job) {
+  debugJob.value = j;
+  debugInfo.value = null;
+  debugError.value = null;
+  await loadDebug(j.id);
+}
+
+async function loadDebug(id: number) {
+  debugLoading.value = true;
+  try {
+    debugInfo.value = await api.jobs.debug(id);
+    debugError.value = null;
+  } catch (e) {
+    debugError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    debugLoading.value = false;
+  }
+}
 let timer: number | null = null;
 
 const statusOptions = [
@@ -272,8 +295,15 @@ onUnmounted(() => {
           <span v-else>—</span>
         </template>
       </Column>
-      <Column header="" style="width: 8rem">
+      <Column header="" style="width: 10rem">
         <template #body="{ data }">
+          <Button
+            text
+            size="small"
+            icon="pi pi-info-circle"
+            title="Show diagnostic info (downloadId, qBit lookup, stalled reason)"
+            @click="openDebug(data)"
+          />
           <Button
             v-if="data.status === 'encoding'"
             text
@@ -324,6 +354,79 @@ onUnmounted(() => {
       </div>
       <template #footer>
         <Button label="Close" @click="logJob = null" />
+      </template>
+    </Dialog>
+
+    <Dialog
+      :visible="debugJob !== null"
+      @update:visible="(v) => (debugJob = v ? debugJob : null)"
+      modal
+      :header="debugJob ? `Job #${debugJob.id} — diagnostics` : ''"
+      :style="{ width: '48rem', maxWidth: '95vw' }"
+    >
+      <div v-if="debugJob" class="debug-dialog">
+        <div v-if="debugLoading" class="muted">Running live qBit lookup…</div>
+        <div v-else-if="debugError" class="log-error">{{ debugError }}</div>
+        <template v-else-if="debugInfo">
+          <div v-if="debugInfo.stalledReason" class="debug-reason">
+            {{ debugInfo.stalledReason }}
+          </div>
+          <dl class="debug-grid">
+            <dt>Status</dt>
+            <dd>{{ debugInfo.status }}</dd>
+            <dt>downloadId</dt>
+            <dd>
+              <code v-if="debugInfo.downloadId">{{ debugInfo.downloadId }}</code>
+              <span v-else class="muted">(empty)</span>
+              <span class="muted"> · length {{ debugInfo.downloadIdLength }}</span>
+            </dd>
+            <dt>File path</dt>
+            <dd><code>{{ debugInfo.filePath }}</code></dd>
+            <dt>qBit configured</dt>
+            <dd>{{ debugInfo.qbit.configured ? "yes" : "no" }}</dd>
+            <template v-if="debugInfo.qbit.configured">
+              <dt>qBit URL</dt>
+              <dd><code>{{ debugInfo.qbit.url }}</code></dd>
+              <dt>qBit reachable</dt>
+              <dd>
+                {{ debugInfo.qbit.reachable ? "yes" : "no" }}
+                <span v-if="debugInfo.qbit.loginError" class="log-error inline">
+                  · {{ debugInfo.qbit.loginError }}
+                </span>
+              </dd>
+              <template v-if="debugInfo.qbit.reachable">
+                <dt>Lookup</dt>
+                <dd v-if="debugInfo.qbit.lookupError" class="log-error inline">
+                  {{ debugInfo.qbit.lookupError }}
+                </dd>
+                <dd v-else-if="debugInfo.qbit.lookup?.found">
+                  <div><strong>Found.</strong></div>
+                  <div>name: <code>{{ debugInfo.qbit.lookup.name }}</code></div>
+                  <div>state: <code>{{ debugInfo.qbit.lookup.state }}</code></div>
+                  <div>category: <code>{{ debugInfo.qbit.lookup.category || "(none)" }}</code></div>
+                  <div>save path: <code>{{ debugInfo.qbit.lookup.savePath }}</code></div>
+                  <div>
+                    progress:
+                    <code>{{ ((debugInfo.qbit.lookup.progress ?? 0) * 100).toFixed(1) }}%</code>
+                  </div>
+                </dd>
+                <dd v-else-if="debugInfo.qbit.lookup">
+                  qBit does not have this hash.
+                </dd>
+                <dd v-else class="muted">(not performed)</dd>
+              </template>
+            </template>
+          </dl>
+        </template>
+      </div>
+      <template #footer>
+        <Button
+          label="Re-run lookup"
+          icon="pi pi-refresh"
+          :loading="debugLoading"
+          @click="debugJob && loadDebug(debugJob.id)"
+        />
+        <Button label="Close" severity="secondary" @click="debugJob = null" />
       </template>
     </Dialog>
   </section>
@@ -425,6 +528,46 @@ onUnmounted(() => {
   color: var(--app-error-fg);
   padding: 0.5rem 0.75rem;
   border-radius: 4px;
+}
+.debug-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.debug-reason {
+  background: var(--app-warn-bg, rgba(255, 200, 0, 0.08));
+  color: var(--app-warn-fg);
+  padding: 0.6rem 0.8rem;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+.debug-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.4rem 1rem;
+  margin: 0;
+  font-size: 0.85rem;
+}
+.debug-grid dt {
+  color: var(--app-muted);
+  font-weight: 500;
+}
+.debug-grid dd {
+  margin: 0;
+  word-break: break-all;
+}
+.debug-grid code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  background: var(--app-log-bg);
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+}
+.log-error.inline {
+  display: inline;
+  padding: 0;
+  background: none;
 }
 .log-pre {
   background: var(--app-log-bg);

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -248,6 +249,7 @@ func registerAdminRoutes(r chi.Router, st *store.Store, w workerClient, hc *heal
 	r.Post("/jobs/retry-failed", retryAllFailed(st))
 	r.Post("/jobs/{id}/retry", retryJob(st))
 	r.Post("/jobs/{id}/cancel", cancelJob(st, w))
+	r.Get("/jobs/{id}/debug", debugJob(st))
 	r.Delete("/jobs/{id}", deleteJob(st))
 	r.Delete("/jobs", deleteTerminalJobs(st))
 }
@@ -1152,6 +1154,123 @@ func cancelJob(st *store.Store, wk workerClient) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "cancelling"})
+	}
+}
+
+// jobDebugDTO bundles the per-job diagnostics the UI needs to figure out why a
+// job is stuck — particularly why a waiting_for_seed job hasn't transitioned.
+// Everything here is read-only and computed live; nothing is persisted.
+type jobDebugDTO struct {
+	JobID            int64           `json:"jobId"`
+	Status           string          `json:"status"`
+	DownloadID       string          `json:"downloadId"`
+	DownloadIDLength int             `json:"downloadIdLength"`
+	FilePath         string          `json:"filePath"`
+	Qbit             jobDebugQbitDTO `json:"qbit"`
+	StalledReason    string          `json:"stalledReason,omitempty"`
+}
+
+type jobDebugQbitDTO struct {
+	Configured   bool                 `json:"configured"`
+	URL          string               `json:"url,omitempty"`
+	Reachable    bool                 `json:"reachable"`
+	LoginError   string               `json:"loginError,omitempty"`
+	Lookup       *jobDebugLookupDTO   `json:"lookup,omitempty"`
+	LookupError  string               `json:"lookupError,omitempty"`
+}
+
+type jobDebugLookupDTO struct {
+	Found    bool    `json:"found"`
+	Hash     string  `json:"hash,omitempty"`
+	Name     string  `json:"name,omitempty"`
+	State    string  `json:"state,omitempty"`
+	Progress float64 `json:"progress,omitempty"`
+	Category string  `json:"category,omitempty"`
+	SavePath string  `json:"savePath,omitempty"`
+}
+
+func debugJob(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+		if err != nil {
+			http.Error(w, "bad id", http.StatusBadRequest)
+			return
+		}
+		row, err := st.GetJob(r.Context(), id)
+		if err != nil {
+			http.Error(w, "job not found", http.StatusNotFound)
+			return
+		}
+
+		out := jobDebugDTO{
+			JobID:            row.ID,
+			Status:           row.Status,
+			DownloadID:       row.DownloadID,
+			DownloadIDLength: len(row.DownloadID),
+			FilePath:         row.FilePath,
+		}
+
+		qbitRow, err := st.FirstQbitInstance(r.Context())
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				out.Qbit.Configured = false
+				if row.Status == string(job.StatusWaitingForSeed) {
+					out.StalledReason = "qBit is not configured — jobs cannot leave waiting_for_seed until qBit is added in Settings."
+				}
+				writeJSON(w, http.StatusOK, out)
+				return
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		out.Qbit.Configured = true
+		out.Qbit.URL = qbitRow.URL
+
+		client, err := qbit.New(qbitRow.URL, qbitRow.Username, qbitRow.Password)
+		if err != nil {
+			out.Qbit.LoginError = err.Error()
+			writeJSON(w, http.StatusOK, out)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+		defer cancel()
+		if err := client.Login(ctx); err != nil {
+			out.Qbit.LoginError = err.Error()
+			writeJSON(w, http.StatusOK, out)
+			return
+		}
+		out.Qbit.Reachable = true
+
+		if row.DownloadID == "" {
+			out.StalledReason = "Job has no downloadId recorded — the worker should transition it to 'ready' on the next tick (within ~30s)."
+			writeJSON(w, http.StatusOK, out)
+			return
+		}
+		t, err := client.TorrentByHash(ctx, row.DownloadID)
+		if err != nil {
+			out.Qbit.LookupError = err.Error()
+			out.StalledReason = "qBit lookup failed; job will retry next tick."
+			writeJSON(w, http.StatusOK, out)
+			return
+		}
+		if t == nil {
+			out.Qbit.Lookup = &jobDebugLookupDTO{Found: false}
+			if row.Status == string(job.StatusWaitingForSeed) {
+				out.StalledReason = "qBit does not have this hash — the next worker tick (within ~30s) should transition this job to 'ready'. If it doesn't, the worker may be wedged; restart the container."
+			}
+		} else {
+			out.Qbit.Lookup = &jobDebugLookupDTO{
+				Found: true, Hash: t.Hash, Name: t.Name, State: t.State,
+				Progress: t.Progress, Category: t.Category, SavePath: t.SavePath,
+			}
+			if row.Status == string(job.StatusWaitingForSeed) {
+				out.StalledReason = fmt.Sprintf(
+					"qBit still holds this torrent (state=%q, category=%q). Recodarr only releases the job once qBit removes the torrent — configure qBit to auto-remove on seeding completion (Options → BitTorrent).",
+					t.State, t.Category,
+				)
+			}
+		}
+		writeJSON(w, http.StatusOK, out)
 	}
 }
 

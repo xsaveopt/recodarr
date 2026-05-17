@@ -126,6 +126,8 @@ type Torrent struct {
 	Name     string  `json:"name"`
 	State    string  `json:"state"`
 	Progress float64 `json:"progress"`
+	Category string  `json:"category"`
+	SavePath string  `json:"save_path"`
 }
 
 // TorrentByHash returns the torrent if it exists in qBit, or (nil, nil) if it's gone.
