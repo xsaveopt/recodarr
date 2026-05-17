@@ -123,6 +123,8 @@ export const api = {
       request<{ deleted: number }>("POST", "/jobs/bulk-delete", { ids }),
     bulkRetry: (ids: number[]) =>
       request<{ retried: number }>("POST", "/jobs/bulk-retry", { ids }),
+    bulkSetProfile: (ids: number[], profileId: number) =>
+      request<{ updated: number }>("POST", "/jobs/bulk-set-profile", { ids, profileId }),
   },
   worker: {
     status: () => request<WorkerStatus>("GET", "/worker/status"),

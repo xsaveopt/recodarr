@@ -42,6 +42,17 @@ const selectedDeletable = computed(() =>
 const selectedRetryable = computed(() =>
   selectedJobs.value.filter((j) => j.status === "failed" || j.status === "skipped" || j.status === "done").length,
 );
+// Profile reassignment skips in-flight encodes — that's the only status where
+// changing the profile would be a no-op (current run is already mid-stream).
+const selectedEditable = computed(() =>
+  selectedJobs.value.filter((j) => j.status !== "encoding").length,
+);
+const bulkProfileId = ref<number | null>(null);
+
+const bulkProfileOptions = computed(() => [
+  { id: 0, name: "— Clear profile —" },
+  ...profiles.value.map((p) => ({ id: p.id, name: p.name })),
+]);
 
 // All known values — the multi-select defaults to all of them checked, so
 // "show everything" is the visual default and the user un-checks to filter out.
@@ -294,6 +305,41 @@ async function bulkDelete() {
   });
 }
 
+async function bulkSetProfile() {
+  const ids = selectedIds.value;
+  if (ids.length === 0 || bulkProfileId.value == null) return;
+  const pid = bulkProfileId.value;
+  const label =
+    pid === 0
+      ? "Clear profile on selected job(s)?"
+      : `Set profile "${profiles.value.find((p) => p.id === pid)?.name ?? pid}" on selected job(s)?`;
+  notify.confirmDelete({
+    name: `${selectedEditable.value} job(s)`,
+    header: label,
+    acceptLabel: "Apply",
+    message:
+      "In-flight encodes in the selection are skipped — cancel and retry them to pick up the new profile. Done jobs get the new profile too; re-queue them to actually re-encode.",
+    onAccept: async () => {
+      bulkBusy.value = true;
+      try {
+        const res = await notify.tryRun(
+          () => api.jobs.bulkSetProfile(ids, pid),
+          "Bulk profile update failed",
+        );
+        if (res !== undefined) {
+          if (res.updated === 0) notify.info("Nothing eligible to update in the selection");
+          else notify.success(`Updated profile on ${res.updated} job(s)`);
+          bulkProfileId.value = null;
+          selectedJobs.value = [];
+          await load();
+        }
+      } finally {
+        bulkBusy.value = false;
+      }
+    },
+  });
+}
+
 async function bulkRetry() {
   const ids = selectedIds.value;
   if (ids.length === 0) return;
@@ -441,6 +487,27 @@ onUnmounted(() => {
         <span v-if="selectedDeletable < selectedJobs.length" class="muted small">
           · {{ selectedJobs.length - selectedDeletable }} encoding (skipped on delete)
         </span>
+      </span>
+      <span class="bulk-profile">
+        <Select
+          v-model="bulkProfileId"
+          :options="bulkProfileOptions"
+          optionLabel="name"
+          optionValue="id"
+          placeholder="Set profile…"
+          class="bulk-profile-select"
+          :disabled="selectedEditable === 0 || bulkBusy"
+        />
+        <Button
+          text
+          size="small"
+          icon="pi pi-check"
+          :label="`Apply to ${selectedEditable}`"
+          :disabled="bulkProfileId == null || selectedEditable === 0 || bulkBusy"
+          :loading="bulkBusy"
+          title="Reassign profile for the selected jobs. Encoding jobs are skipped."
+          @click="bulkSetProfile"
+        />
       </span>
       <Button
         text
@@ -825,6 +892,14 @@ onUnmounted(() => {
 }
 .filter-select-narrow {
   width: 10rem;
+}
+.bulk-profile {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.bulk-profile-select {
+  width: 12rem;
 }
 .bulk-bar {
   display: flex;

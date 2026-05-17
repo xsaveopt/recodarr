@@ -812,6 +812,27 @@ func (s *Store) UpdateJobProfile(ctx context.Context, id int64, profileID sql.Nu
 	return err
 }
 
+// SetJobsProfile bulk-updates profile_id on the listed jobs. In-flight encodes
+// are skipped (changing the profile mid-encode would do nothing useful), the
+// returned count reflects rows actually updated.
+func (s *Store) SetJobsProfile(ctx context.Context, ids []int64, profileID sql.NullInt64) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, profileID)
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	q := `UPDATE jobs SET profile_id = ?, updated_at = CURRENT_TIMESTAMP
+	      WHERE id IN (` + placeholders(len(ids)) + `) AND status != 'encoding'`
+	res, err := s.DB.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 func boolToInt(b bool) int {
 	if b {
 		return 1

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -259,6 +260,7 @@ func registerAdminRoutes(r chi.Router, st *store.Store, w workerClient, hc *heal
 	r.Delete("/jobs", deleteTerminalJobs(st))
 	r.Post("/jobs/bulk-delete", bulkDeleteJobs(st))
 	r.Post("/jobs/bulk-retry", bulkRetryJobs(st))
+	r.Post("/jobs/bulk-set-profile", bulkSetJobProfile(st))
 }
 
 // --- settings ---
@@ -1475,6 +1477,31 @@ func bulkRetryJobs(st *store.Store) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]int64{"retried": n})
+	}
+}
+
+// bulkSetJobProfile reassigns profile_id on the listed jobs. Pass profileId=0
+// (or omit) to clear. In-flight encodes are skipped server-side.
+func bulkSetJobProfile(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			IDs       []int64 `json:"ids"`
+			ProfileID int64   `json:"profileId"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "bad payload", http.StatusBadRequest)
+			return
+		}
+		var pid sql.NullInt64
+		if body.ProfileID > 0 {
+			pid = sql.NullInt64{Int64: body.ProfileID, Valid: true}
+		}
+		n, err := st.SetJobsProfile(r.Context(), body.IDs, pid)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]int64{"updated": n})
 	}
 }
 
