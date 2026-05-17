@@ -132,6 +132,7 @@ func handleArrWebhook(st *store.Store, kind arr.Kind) http.HandlerFunc {
 				return
 			}
 		}
+		tagsJSON, _ := json.Marshal(item.ParentTags)
 		jr := store.JobRow{
 			ArrKind:       string(kind),
 			ArrInstanceID: inst.ID,
@@ -143,6 +144,7 @@ func handleArrWebhook(st *store.Store, kind arr.Kind) http.HandlerFunc {
 			DownloadID:    item.DownloadID,
 			ProfileID:     profileID,
 			Status:        string(job.StatusWaitingForSeed),
+			Tags:          string(tagsJSON),
 		}
 		id, err := enqueueIfNew(r.Context(), st, jr)
 		if err != nil {

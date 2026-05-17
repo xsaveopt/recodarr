@@ -92,6 +92,11 @@ type JobRow struct {
 	FinishedAt    sql.NullTime
 	OriginalSize  sql.NullInt64
 	FinalSize     sql.NullInt64
+	// Tags is a JSON-encoded []string of the *arr tag labels that were on
+	// the item when the webhook fired. Used by the worker to re-resolve the
+	// profile against the current tag→profile mappings, so mapping edits
+	// take effect on queued jobs.
+	Tags string
 }
 
 type JobStatsRow struct {
@@ -104,11 +109,11 @@ type JobStatsRow struct {
 	TotalSavedBytes int64
 }
 
-const jobCols = `id,arr_kind,arr_instance_id,arr_item_id,arr_parent_id,title,file_path,file_size,download_id,profile_id,status,error,encode_log,refresh_error,attempts,created_at,updated_at,started_at,finished_at,original_size,final_size`
+const jobCols = `id,arr_kind,arr_instance_id,arr_item_id,arr_parent_id,title,file_path,file_size,download_id,profile_id,status,error,encode_log,refresh_error,attempts,created_at,updated_at,started_at,finished_at,original_size,final_size,tags`
 
 func scanJob(scan func(...any) error) (JobRow, error) {
 	var r JobRow
-	err := scan(&r.ID, &r.ArrKind, &r.ArrInstanceID, &r.ArrItemID, &r.ArrParentID, &r.Title, &r.FilePath, &r.FileSize, &r.DownloadID, &r.ProfileID, &r.Status, &r.Error, &r.EncodeLog, &r.RefreshError, &r.Attempts, &r.CreatedAt, &r.UpdatedAt, &r.StartedAt, &r.FinishedAt, &r.OriginalSize, &r.FinalSize)
+	err := scan(&r.ID, &r.ArrKind, &r.ArrInstanceID, &r.ArrItemID, &r.ArrParentID, &r.Title, &r.FilePath, &r.FileSize, &r.DownloadID, &r.ProfileID, &r.Status, &r.Error, &r.EncodeLog, &r.RefreshError, &r.Attempts, &r.CreatedAt, &r.UpdatedAt, &r.StartedAt, &r.FinishedAt, &r.OriginalSize, &r.FinalSize, &r.Tags)
 	return r, err
 }
 
@@ -635,13 +640,26 @@ func (s *Store) FirstQbitInstance(ctx context.Context) (*QbitInstanceRow, error)
 }
 
 func (s *Store) InsertJob(ctx context.Context, r JobRow) (int64, error) {
+	tags := r.Tags
+	if tags == "" {
+		tags = "[]"
+	}
 	res, err := s.DB.ExecContext(ctx,
-		`INSERT INTO jobs (arr_kind,arr_instance_id,arr_item_id,arr_parent_id,title,file_path,file_size,download_id,profile_id,status) VALUES (?,?,?,?,?,?,?,?,?,?)`,
-		r.ArrKind, r.ArrInstanceID, r.ArrItemID, r.ArrParentID, r.Title, r.FilePath, r.FileSize, r.DownloadID, r.ProfileID, r.Status)
+		`INSERT INTO jobs (arr_kind,arr_instance_id,arr_item_id,arr_parent_id,title,file_path,file_size,download_id,profile_id,status,tags) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		r.ArrKind, r.ArrInstanceID, r.ArrItemID, r.ArrParentID, r.Title, r.FilePath, r.FileSize, r.DownloadID, r.ProfileID, r.Status, tags)
 	if err != nil {
 		return 0, err
 	}
 	return res.LastInsertId()
+}
+
+// UpdateJobProfile rewrites a job's profile_id. Used by the worker to
+// re-route a queued job after the operator changes tag→profile mappings.
+func (s *Store) UpdateJobProfile(ctx context.Context, id int64, profileID sql.NullInt64) error {
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE jobs SET profile_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		profileID, id)
+	return err
 }
 
 func boolToInt(b bool) int {

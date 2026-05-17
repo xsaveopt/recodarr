@@ -110,7 +110,13 @@ func (c *Client) Encode(
 	}
 
 	if err := c.watchUntilDone(ctx, created.JobID, onProgress); err != nil {
-		return handbrake.RunResult{}, fmt.Errorf("agent encode: %w", err)
+		// Pull the HandBrake log before the deferred cleanup wipes the job
+		// dir, so the failure surfaces with real encoder output in Recodarr's
+		// failed-job UI (otherwise the user only sees "exit status N").
+		logCtx, logCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		log, _ := c.fetchLog(logCtx, created.JobID)
+		logCancel()
+		return handbrake.RunResult{Log: log}, fmt.Errorf("agent encode: %w", err)
 	}
 
 	tempPath := localTempPath(sourcePath, s)

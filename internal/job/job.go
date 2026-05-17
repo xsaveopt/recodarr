@@ -2,6 +2,8 @@ package job
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -442,6 +444,42 @@ func (w *Worker) checkSeeding(ctx context.Context) {
 	}
 }
 
+// reresolveProfile returns the profile_id that the current tag→profile
+// mappings produce for this job, plus a flag indicating whether that differs
+// from the job's stored profile_id. Jobs whose tags column is empty (the JSON
+// "[]" default, or an unmigrated row) are left alone — returning changed=false
+// preserves whatever was frozen at webhook time. A successful re-resolve to
+// "no match" returns (invalid NullInt64, true) so the worker can fail the job
+// with a clear "no mapping matches current tags" message.
+func (w *Worker) reresolveProfile(ctx context.Context, j store.JobRow) (sql.NullInt64, bool) {
+	if j.Tags == "" || j.Tags == "[]" {
+		return j.ProfileID, false
+	}
+	var tags []string
+	if err := json.Unmarshal([]byte(j.Tags), &tags); err != nil || len(tags) == 0 {
+		return j.ProfileID, false
+	}
+	mappings, err := w.store.ListTagMappingsByKind(ctx, j.ArrKind)
+	if err != nil {
+		return j.ProfileID, false
+	}
+	idx := make(map[string]int64, len(mappings))
+	for _, m := range mappings {
+		idx[m.TagLabel] = m.ProfileID
+	}
+	var resolved sql.NullInt64
+	for _, t := range tags {
+		if pid, ok := idx[t]; ok {
+			resolved = sql.NullInt64{Int64: pid, Valid: true}
+			break
+		}
+	}
+	if resolved.Valid == j.ProfileID.Valid && resolved.Int64 == j.ProfileID.Int64 {
+		return j.ProfileID, false
+	}
+	return resolved, true
+}
+
 func (w *Worker) transition(ctx context.Context, id int64, from, to, reason string) {
 	ok, err := w.store.TransitionJobStatus(ctx, id, from, to)
 	if err != nil {
@@ -535,6 +573,23 @@ func (w *Worker) startEncode(parentCtx context.Context, j store.JobRow) {
 // long-lived context used for DB writes that must complete even if the per-job
 // context was cancelled.
 func (w *Worker) encodeOne(encCtx, parentCtx context.Context, j store.JobRow) {
+	// Re-resolve profile from the job's stored tags + current mappings, so
+	// edits to tag→profile mappings take effect on already-queued jobs. Jobs
+	// with no stored tags (i.e. created before this column existed) fall
+	// through to whatever profile_id was frozen at webhook time.
+	if newPID, changed := w.reresolveProfile(parentCtx, j); changed {
+		if err := w.store.UpdateJobProfile(parentCtx, j.ID, newPID); err != nil {
+			slog.Warn("re-resolve profile update", "id", j.ID, "err", err)
+		} else {
+			j.ProfileID = newPID
+			if newPID.Valid {
+				slog.Info("job profile re-resolved", "id", j.ID, "profile_id", newPID.Int64)
+			} else {
+				slog.Info("job profile cleared by current mappings", "id", j.ID)
+			}
+		}
+	}
+
 	if !j.ProfileID.Valid {
 		_ = w.store.MarkJobFailed(parentCtx, j.ID, "no profile assigned (tag-profile mapping missing)", "")
 		slog.Error("job missing profile", "id", j.ID)
