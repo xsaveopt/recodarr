@@ -373,7 +373,19 @@ onUnmounted(() => {
           </div>
           <dl class="debug-grid">
             <dt>Status</dt>
-            <dd>{{ debugInfo.status }}</dd>
+            <dd>
+              {{ debugInfo.status }}
+              <span
+                v-if="
+                  debugInfo.status === 'waiting_for_seed' &&
+                  debugInfo.waitingForSeedCount > debugInfo.seedCheckBatchLimit
+                "
+                class="log-error inline"
+              >
+                · {{ debugInfo.waitingForSeedCount }} jobs waiting,
+                only {{ debugInfo.seedCheckBatchLimit }} checked per tick — older IDs are processed first
+              </span>
+            </dd>
             <dt>downloadId</dt>
             <dd>
               <code v-if="debugInfo.downloadId">{{ debugInfo.downloadId }}</code>

@@ -1167,6 +1167,8 @@ type jobDebugDTO struct {
 	DownloadIDLength int             `json:"downloadIdLength"`
 	FilePath         string          `json:"filePath"`
 	Qbit             jobDebugQbitDTO `json:"qbit"`
+	WaitingForSeed   int64           `json:"waitingForSeedCount"`
+	SeedCheckLimit   int             `json:"seedCheckBatchLimit"`
 	StalledReason    string          `json:"stalledReason,omitempty"`
 }
 
@@ -1208,6 +1210,10 @@ func debugJob(st *store.Store) http.HandlerFunc {
 			DownloadID:       row.DownloadID,
 			DownloadIDLength: len(row.DownloadID),
 			FilePath:         row.FilePath,
+			SeedCheckLimit:   100,
+		}
+		if stats, err := st.GetJobStats(r.Context()); err == nil {
+			out.WaitingForSeed = stats.WaitingForSeed
 		}
 
 		qbitRow, err := st.FirstQbitInstance(r.Context())

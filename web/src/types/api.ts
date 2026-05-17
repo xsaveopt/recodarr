@@ -147,6 +147,8 @@ export interface JobDebug {
     };
     lookupError?: string;
   };
+  waitingForSeedCount: number;
+  seedCheckBatchLimit: number;
   stalledReason?: string;
 }
 
