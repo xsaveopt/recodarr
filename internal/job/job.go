@@ -82,11 +82,12 @@ type Worker struct {
 	// penalized in the retry budget. Entries are consumed by encodeOne's
 	// cancellation branch.
 	requeueOnCancel map[int64]struct{}
-	// remoteEncoder, when non-nil, replaces handbrake.Run for the actual
-	// encode step. The health checker swaps it in/out based on the
-	// configured agent's reachability so a flaky remote falls back to local
-	// (when agent_fallback_local is true) without restarting the worker.
-	remoteEncoder RemoteEncoder
+	// remoteResolver, when set, is called right before each encode to decide
+	// whether to route to a remote agent. Resolving at encode-start (rather
+	// than relying on a cached binding refreshed by the slow health-checker
+	// tick) means the worker reacts immediately to an agent that just came
+	// up or went down. Return nil to encode locally.
+	remoteResolver RemoteEncoderResolver
 }
 
 // RemoteEncoder is the minimal surface area encodeOne needs from a remote
@@ -96,19 +97,25 @@ type RemoteEncoder interface {
 	Encode(ctx context.Context, sourcePath string, s handbrake.Settings, onProgress func(handbrake.Progress)) (handbrake.RunResult, error)
 }
 
-// SetRemoteEncoder swaps the active remote encoder. Pass nil to fall back to
-// local handbrake.Run. Safe to call from any goroutine; the next encode tick
+// RemoteEncoderResolver returns the remote encoder to use for the next encode,
+// or nil to encode locally. Called with a short-lived context per encode so
+// the implementation can do a live reachability check without holding the
+// worker up indefinitely.
+type RemoteEncoderResolver func(ctx context.Context) RemoteEncoder
+
+// SetRemoteEncoderResolver swaps the per-encode remote resolver. Pass nil to
+// always encode locally. Safe to call from any goroutine; the next encode
 // reads the new value.
-func (w *Worker) SetRemoteEncoder(r RemoteEncoder) {
+func (w *Worker) SetRemoteEncoderResolver(r RemoteEncoderResolver) {
 	w.mu.Lock()
-	w.remoteEncoder = r
+	w.remoteResolver = r
 	w.mu.Unlock()
 }
 
-func (w *Worker) getRemoteEncoder() RemoteEncoder {
+func (w *Worker) getRemoteResolver() RemoteEncoderResolver {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.remoteEncoder
+	return w.remoteResolver
 }
 
 func NewWorker(s *store.Store) *Worker {
@@ -626,7 +633,13 @@ func (w *Worker) encodeOne(encCtx, parentCtx context.Context, j store.JobRow) {
 		// identically regardless of where the encode ran. The handbrake log
 		// for failures is also returned via RunResult.Log, so the dashboard's
 		// failure UI doesn't have to branch either.
-		if remote := w.getRemoteEncoder(); remote != nil {
+		var remote RemoteEncoder
+		if resolver := w.getRemoteResolver(); resolver != nil {
+			rctx, rcancel := context.WithTimeout(encCtx, 8*time.Second)
+			remote = resolver(rctx)
+			rcancel()
+		}
+		if remote != nil {
 			// Remote always behaves as NoCommit — the worker performs the
 			// Commit locally after download.
 			settings.NoCommit = true

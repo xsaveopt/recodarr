@@ -126,16 +126,30 @@ func runServer() error {
 	go worker.Run(ctx)
 
 	hc := health.New(st)
-	// Health checker drives the live local/remote dispatcher swap. nil means
-	// "no reachable agent" — the worker falls back to local handbrake.Run.
-	hc.SetAgentBinder(func(c *agentpkg.Client) {
-		if c == nil {
-			worker.SetRemoteEncoder(nil)
-			return
-		}
-		worker.SetRemoteEncoder(c)
-	})
 	go hc.Run(ctx)
+
+	// Per-encode remote resolver. Reads agent settings live, does a short
+	// reachability ping, and decides remote-vs-local at encode-start so a
+	// freshly-started agent gets used on the very next encode (instead of
+	// having to wait up to the health-checker tick interval).
+	worker.SetRemoteEncoderResolver(func(rctx context.Context) job.RemoteEncoder {
+		cfg, err := st.LoadAppSettings(rctx)
+		if err != nil || !cfg.AgentEnabled || cfg.AgentURL == "" || cfg.AgentToken == "" {
+			return nil
+		}
+		client := agentpkg.NewClient(cfg.AgentURL, cfg.AgentToken)
+		if _, err := client.Ping(rctx); err != nil {
+			if cfg.AgentFallbackLocal {
+				slog.Warn("remote agent unreachable, falling back to local encode", "url", cfg.AgentURL, "err", err)
+				return nil
+			}
+			// Operator disabled local fallback: hand back the client so the
+			// encode fails loudly instead of silently going local.
+			slog.Warn("remote agent unreachable, fallback disabled — encode will fail", "url", cfg.AgentURL, "err", err)
+			return client
+		}
+		return client
+	})
 
 	srv := &http.Server{
 		Addr:              addr,
