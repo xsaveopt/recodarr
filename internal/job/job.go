@@ -365,9 +365,15 @@ func (w *Worker) tick(ctx context.Context) {
 	w.runEncodes(ctx)
 }
 
+// SeedCheckBatchLimit caps how many waiting_for_seed jobs are inspected per
+// tick. Set high enough that real-world queues clear in one pass; the bulk
+// qBit call is a single HTTP roundtrip regardless of size, so this is mostly
+// a safety valve against pathological queue depths.
+const SeedCheckBatchLimit = 5000
+
 // checkSeeding moves jobs from waiting_for_seed → ready when qBit no longer holds the torrent.
 func (w *Worker) checkSeeding(ctx context.Context) {
-	jobs, err := w.store.JobsByStatus(ctx, string(StatusWaitingForSeed), 100)
+	jobs, err := w.store.JobsByStatus(ctx, string(StatusWaitingForSeed), SeedCheckBatchLimit)
 	if err != nil {
 		slog.Error("checkSeeding list", "err", err)
 		return
@@ -376,10 +382,28 @@ func (w *Worker) checkSeeding(ctx context.Context) {
 		return
 	}
 
+	// Jobs with no downloadId can transition immediately — no qBit call needed.
+	hashes := make([]string, 0, len(jobs))
+	hashJobs := make(map[string][]int64, len(jobs))
+	for _, j := range jobs {
+		if j.DownloadID == "" {
+			w.transition(ctx, j.ID, string(StatusWaitingForSeed), string(StatusReady), "no downloadId, skipping seed check")
+			continue
+		}
+		h := strings.ToLower(j.DownloadID)
+		if _, seen := hashJobs[h]; !seen {
+			hashes = append(hashes, h)
+		}
+		hashJobs[h] = append(hashJobs[h], j.ID)
+	}
+	if len(hashes) == 0 {
+		return
+	}
+
 	qbitRow, err := w.store.FirstQbitInstance(ctx)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			slog.Warn("qbit not configured; jobs remain waiting", "count", len(jobs))
+			slog.Warn("qbit not configured; jobs remain waiting", "count", len(hashes))
 			return
 		}
 		slog.Error("checkSeeding qbit lookup", "err", err)
@@ -396,18 +420,17 @@ func (w *Worker) checkSeeding(ctx context.Context) {
 		return
 	}
 
-	for _, j := range jobs {
-		if j.DownloadID == "" {
-			w.transition(ctx, j.ID, string(StatusWaitingForSeed), string(StatusReady), "no downloadId, skipping seed check")
+	got, err := client.TorrentsByHashes(ctx, hashes)
+	if err != nil {
+		slog.Warn("qbit torrents lookup", "count", len(hashes), "err", err)
+		return
+	}
+	for hash, ids := range hashJobs {
+		if _, present := got[hash]; present {
 			continue
 		}
-		t, err := client.TorrentByHash(ctx, j.DownloadID)
-		if err != nil {
-			slog.Warn("qbit torrent lookup", "id", j.ID, "err", err)
-			continue
-		}
-		if t == nil {
-			w.transition(ctx, j.ID, string(StatusWaitingForSeed), string(StatusReady), "qbit no longer holds torrent")
+		for _, id := range ids {
+			w.transition(ctx, id, string(StatusWaitingForSeed), string(StatusReady), "qbit no longer holds torrent")
 		}
 	}
 }

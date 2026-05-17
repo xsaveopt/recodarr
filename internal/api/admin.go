@@ -1210,7 +1210,7 @@ func debugJob(st *store.Store) http.HandlerFunc {
 			DownloadID:       row.DownloadID,
 			DownloadIDLength: len(row.DownloadID),
 			FilePath:         row.FilePath,
-			SeedCheckLimit:   100,
+			SeedCheckLimit:   job.SeedCheckBatchLimit,
 		}
 		if stats, err := st.GetJobStats(r.Context()); err == nil {
 			out.WaitingForSeed = stats.WaitingForSeed

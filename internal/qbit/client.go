@@ -132,7 +132,29 @@ type Torrent struct {
 
 // TorrentByHash returns the torrent if it exists in qBit, or (nil, nil) if it's gone.
 func (c *Client) TorrentByHash(ctx context.Context, hash string) (*Torrent, error) {
-	u := fmt.Sprintf("%s/api/v2/torrents/info?hashes=%s", c.baseURL, url.QueryEscape(strings.ToLower(hash)))
+	got, err := c.TorrentsByHashes(ctx, []string{hash})
+	if err != nil {
+		return nil, err
+	}
+	if t, ok := got[strings.ToLower(hash)]; ok {
+		return &t, nil
+	}
+	return nil, nil
+}
+
+// TorrentsByHashes batches a single /torrents/info call for any number of
+// hashes. The result is keyed by lowercase hash so callers can spot which
+// queried hashes are missing from qBit.
+func (c *Client) TorrentsByHashes(ctx context.Context, hashes []string) (map[string]Torrent, error) {
+	if len(hashes) == 0 {
+		return map[string]Torrent{}, nil
+	}
+	lowered := make([]string, len(hashes))
+	for i, h := range hashes {
+		lowered[i] = strings.ToLower(h)
+	}
+	u := fmt.Sprintf("%s/api/v2/torrents/info?hashes=%s",
+		c.baseURL, url.QueryEscape(strings.Join(lowered, "|")))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
@@ -149,8 +171,9 @@ func (c *Client) TorrentByHash(ctx context.Context, hash string) (*Torrent, erro
 	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
 		return nil, err
 	}
-	if len(list) == 0 {
-		return nil, nil
+	out := make(map[string]Torrent, len(list))
+	for _, t := range list {
+		out[strings.ToLower(t.Hash)] = t
 	}
-	return &list[0], nil
+	return out, nil
 }
