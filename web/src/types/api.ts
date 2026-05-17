@@ -128,6 +128,8 @@ export interface Job {
 }
 
 export interface JobListParams {
+  // Comma-separated lists; omitted means "any". Empty string is treated as
+  // "any" too — the UI sends omit when all options are checked.
   status?: string;
   kind?: string;
   profileId?: number;

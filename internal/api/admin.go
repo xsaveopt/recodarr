@@ -1095,6 +1095,23 @@ func rowToJobDTO(row store.JobRow) jobDTO {
 	return d
 }
 
+// splitNonEmpty splits a comma-separated query-param value into a clean
+// list, dropping empty fragments. Returns nil for "" so the caller can use
+// len(...) == 0 to mean "no filter".
+func splitNonEmpty(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 type jobsPageDTO struct {
 	Total  int64     `json:"total"`
 	Limit  int       `json:"limit"`
@@ -1106,9 +1123,9 @@ func listJobs(st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		opts := store.JobListOptions{
-			Status: q.Get("status"),
-			Kind:   q.Get("kind"),
-			Search: q.Get("q"),
+			Statuses: splitNonEmpty(q.Get("status")),
+			Kinds:    splitNonEmpty(q.Get("kind")),
+			Search:   q.Get("q"),
 		}
 		if v := q.Get("profileId"); v != "" {
 			if n, err := strconv.ParseInt(v, 10, 64); err == nil {

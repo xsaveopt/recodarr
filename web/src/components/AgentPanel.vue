@@ -16,6 +16,9 @@ const token = ref<string>("");
 const tokenStored = ref<boolean>(false);
 const fallbackLocal = ref<boolean>(true);
 const testing = ref(false);
+const agentSlots = ref<number | null>(null);
+const agentActive = ref<number | null>(null);
+const serverMaxParallel = ref<number>(1);
 
 async function load() {
   const s = await notify.tryRun(() => api.settings.get(), "Couldn't load settings");
@@ -25,6 +28,20 @@ async function load() {
     tokenStored.value = s.hasAgentToken === "true";
     token.value = "";
     fallbackLocal.value = s.agent_fallback_local !== "false";
+    serverMaxParallel.value = parseInt(s.max_parallel_encodes ?? "1") || 1;
+  }
+  if (enabled.value && url.value) {
+    // Best-effort probe so the panel can show actual agent capacity without
+    // the user clicking Test first.
+    try {
+      const r = await api.agent.test({ url: url.value, token: "" });
+      if (r.ok) {
+        agentSlots.value = r.slots ?? null;
+        agentActive.value = r.active ?? null;
+      }
+    } catch {
+      /* ignore — Test button still works */
+    }
   }
 }
 
@@ -61,10 +78,14 @@ async function test() {
       token: token.value.trim(),
     });
     if (res.ok) {
+      agentSlots.value = res.slots ?? null;
+      agentActive.value = res.active ?? null;
       notify.success(
         `Agent reachable — ${res.slots ?? "?"} slot(s), ${res.active ?? 0} active. ${res.hb ?? ""}`,
       );
     } else {
+      agentSlots.value = null;
+      agentActive.value = null;
       notify.error(`Agent unreachable: ${res.error}`);
     }
   } catch (e) {
@@ -113,6 +134,31 @@ onMounted(load);
       </label>
     </div>
 
+    <div v-if="agentSlots !== null" class="capacity-card">
+      <div class="capacity-row">
+        <span>Agent capacity</span>
+        <strong>{{ agentActive ?? 0 }} / {{ agentSlots }} slot(s)</strong>
+      </div>
+      <p v-if="agentSlots < serverMaxParallel" class="muted small warn">
+        ⚠ The agent only accepts <strong>{{ agentSlots }}</strong> concurrent encode(s) but the
+        server is configured for <strong>{{ serverMaxParallel }}</strong>. Raise
+        <code>RECODARR_AGENT_MAX_PARALLEL</code> on the agent container and restart it to use the
+        full server concurrency.
+      </p>
+      <p v-else-if="agentSlots > serverMaxParallel" class="muted small">
+        The agent can take up to {{ agentSlots }} encodes at once, but the server only dispatches
+        {{ serverMaxParallel }}. Raise <strong>Parallel encodes</strong> on the Worker tab to use
+        the full agent capacity.
+      </p>
+    </div>
+
+    <p class="muted small">
+      Concurrency is governed by two settings: the <strong>Parallel encodes</strong> value on the
+      Worker tab caps how many jobs the server dispatches at once, and
+      <code>RECODARR_AGENT_MAX_PARALLEL</code> on the agent container caps how many it will accept.
+      Set both to the same value, matching what your GPU can actually run in parallel.
+    </p>
+
     <p class="muted small">
       Bandwidth: each encode uploads the full source and downloads the encoded result. On
       gigabit LAN expect ~1 GB/min each way; pick the agent over local when its GPU is fast
@@ -159,5 +205,21 @@ onMounted(load);
 :deep(.p-password),
 :deep(.p-password-input) {
   width: 100%;
+}
+.capacity-card {
+  border: 1px solid var(--app-border, rgba(255, 255, 255, 0.08));
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.capacity-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.warn {
+  color: var(--app-warn-fg, #d39e00);
 }
 </style>

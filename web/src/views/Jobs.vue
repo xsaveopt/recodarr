@@ -7,6 +7,7 @@ import Tag from "primevue/tag";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import Select from "primevue/select";
+import MultiSelect from "primevue/multiselect";
 import Dialog from "primevue/dialog";
 import ProgressBar from "primevue/progressbar";
 
@@ -25,10 +26,27 @@ const loading = ref(false);
 const profiles = ref<Profile[]>([]);
 const busy = ref<Set<number>>(new Set());
 
+// All known values — the multi-select defaults to all of them checked, so
+// "show everything" is the visual default and the user un-checks to filter out.
+const ALL_STATUSES = ["waiting_for_seed", "ready", "encoding", "done", "failed", "skipped"] as const;
+const ALL_KINDS = ["sonarr", "radarr"] as const;
+
+function parseList(raw: string | string[] | undefined, allowed: readonly string[]): string[] {
+  if (!raw) return [...allowed]; // unset query param → "show everything" preset
+  const value = Array.isArray(raw) ? raw.join(",") : raw;
+  const picked = value
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => allowed.includes(s));
+  // Empty after filtering = nothing checked, which the UI represents as
+  // status=__none__ in the URL so it round-trips honestly.
+  return picked;
+}
+
 // URL-bound state so refresh / shareable links survive.
 const titleFilter = ref<string>((route.query.q as string) ?? "");
-const statusFilter = ref<string>((route.query.status as string) ?? "");
-const kindFilter = ref<string>((route.query.kind as string) ?? "");
+const statusFilter = ref<string[]>(parseList(route.query.status as string | undefined, ALL_STATUSES));
+const kindFilter = ref<string[]>(parseList(route.query.kind as string | undefined, ALL_KINDS));
 const profileFilter = ref<number | null>(
   route.query.profileId ? Number(route.query.profileId) : null,
 );
@@ -37,13 +55,20 @@ const pageSize = ref<number>(
 );
 const pageOffset = ref<number>(route.query.offset ? Math.max(0, Number(route.query.offset)) : 0);
 
+function compactList(picked: string[], allowed: readonly string[]): string | undefined {
+  // All checked = no filter, omit from URL & query.
+  if (picked.length === allowed.length) return undefined;
+  if (picked.length === 0) return undefined; // 0-of-N is the same as all-of-N to backend; UI shows empty box
+  return picked.join(",");
+}
+
 function syncURL() {
   router.replace({
     query: {
       ...route.query,
       q: titleFilter.value || undefined,
-      status: statusFilter.value || undefined,
-      kind: kindFilter.value || undefined,
+      status: compactList(statusFilter.value, ALL_STATUSES),
+      kind: compactList(kindFilter.value, ALL_KINDS),
       profileId: profileFilter.value || undefined,
       offset: pageOffset.value > 0 ? String(pageOffset.value) : undefined,
       size: pageSize.value !== 50 ? String(pageSize.value) : undefined,
@@ -91,7 +116,6 @@ async function loadDebug(id: number) {
 let timer: number | null = null;
 
 const statusOptions = [
-  { value: "", label: "All statuses" },
   { value: "waiting_for_seed", label: "Waiting for seed" },
   { value: "ready", label: "Ready" },
   { value: "encoding", label: "Encoding" },
@@ -101,7 +125,6 @@ const statusOptions = [
 ];
 
 const kindOptions = [
-  { value: "", label: "All sources" },
   { value: "sonarr", label: "Sonarr" },
   { value: "radarr", label: "Radarr" },
 ];
@@ -123,8 +146,8 @@ async function load() {
     const res = await notify.tryRun(
       () =>
         api.jobs.list({
-          status: statusFilter.value || undefined,
-          kind: kindFilter.value || undefined,
+          status: compactList(statusFilter.value, ALL_STATUSES),
+          kind: compactList(kindFilter.value, ALL_KINDS),
           profileId: profileFilter.value ?? undefined,
           q: titleFilter.value.trim() || undefined,
           limit: pageSize.value,
@@ -317,19 +340,24 @@ onUnmounted(() => {
     </div>
     <div class="filters">
       <InputText v-model="titleFilter" placeholder="Search title…" class="filter-input" />
-      <Select
+      <MultiSelect
         v-model="statusFilter"
         :options="statusOptions"
         optionLabel="label"
         optionValue="value"
+        :maxSelectedLabels="3"
+        :selectedItemsLabel="`{0} statuses`"
+        placeholder="No statuses selected"
         class="filter-select"
       />
-      <Select
+      <MultiSelect
         v-model="kindFilter"
         :options="kindOptions"
         optionLabel="label"
         optionValue="value"
-        class="filter-select"
+        :maxSelectedLabels="2"
+        placeholder="No sources selected"
+        class="filter-select filter-select-narrow"
       />
       <Select
         v-model="profileFilter"
@@ -665,6 +693,9 @@ onUnmounted(() => {
 }
 .filter-select {
   width: 14rem;
+}
+.filter-select-narrow {
+  width: 10rem;
 }
 .error {
   background: var(--app-error-bg);

@@ -16,7 +16,7 @@ const intervalSeconds = ref<number>(30);
 const maxParallel = ref<number>(1);
 const windowStart = ref<string>("");
 const windowEnd = ref<string>("");
-const paused = ref<boolean>(false);
+const enabled = ref<boolean>(true);
 const suffixEnabled = ref<boolean>(false);
 const outputSuffix = ref<string>("recodarr");
 
@@ -27,7 +27,7 @@ async function load() {
     maxParallel.value = parseInt(s.max_parallel_encodes ?? "1") || 1;
     windowStart.value = s.encoding_window_start ?? "";
     windowEnd.value = s.encoding_window_end ?? "";
-    paused.value = s.encoding_paused === "true";
+    enabled.value = s.encoding_paused !== "true";
     suffixEnabled.value = s.output_suffix_enabled === "true";
     outputSuffix.value = (s.output_suffix ?? "").trim() || "recodarr";
   }
@@ -42,23 +42,24 @@ const suffixPreview = computed(
 // settings save, because pausing has a side-effect: it cancels and re-queues
 // any in-flight encodes immediately. The settings save path only writes the
 // flag — no cancellation.
-async function togglePause(next: boolean) {
+async function toggleEnabled(next: boolean) {
+  const pause = !next;
   const res = await notify.tryRun(
-    () => api.worker.setPaused(next),
-    next ? "Couldn't pause" : "Couldn't resume",
+    () => api.worker.setPaused(pause),
+    pause ? "Couldn't pause" : "Couldn't resume",
   );
   if (res === undefined) {
-    paused.value = !next; // revert UI on failure
+    enabled.value = !next; // revert UI on failure
     return;
   }
-  if (next) {
+  if (pause) {
     notify.success(
       res.cancelled > 0
-        ? `Encoding paused — ${res.cancelled} in-flight encode(s) re-queued`
-        : "Encoding paused",
+        ? `Worker disabled — ${res.cancelled} in-flight encode(s) re-queued`
+        : "Worker disabled",
     );
   } else {
-    notify.success("Encoding resumed");
+    notify.success("Worker enabled");
   }
 }
 
@@ -101,26 +102,25 @@ onMounted(load);
       Controls how frequently Recodarr checks for seed completion and starts encodes.
     </p>
 
-    <!-- Pause is an instant kill-switch — deliberately outside the form +
-         Save flow below so toggling it actually pauses without an extra
-         click. The "Applies immediately" label is the contract. -->
-    <div class="instant-card" :class="{ paused }">
+    <!-- Master on/off — instant, outside the Save flow below so toggling it
+         actually applies without an extra click. -->
+    <div class="instant-card" :class="{ paused: !enabled }">
       <label class="pause-row">
         <span class="pause-label">
-          <span>Pause encoding</span>
+          <span>Worker enabled</span>
           <span class="muted small">Applies immediately — no save needed</span>
         </span>
         <span class="pause-control">
-          <ToggleSwitch v-model="paused" @update:modelValue="togglePause" />
+          <ToggleSwitch v-model="enabled" @update:modelValue="toggleEnabled" />
           <span class="muted small">{{
-            paused ? "Paused — jobs continue to queue" : "Worker is running"
+            enabled ? "Worker is running" : "Disabled — jobs continue to queue"
           }}</span>
         </span>
       </label>
       <p class="muted small">
-        Master kill-switch. When turned on, any in-flight encode is cancelled and re-queued (no
-        attempt counted), and no new encodes will start until you turn it off again. Webhooks and
-        the queue keep working normally.
+        Master on/off switch. When turned off, any in-flight encode is cancelled and re-queued (no
+        attempt counted), and no new encodes will start until you turn it back on. Webhooks and the
+        queue keep working normally.
       </p>
     </div>
 

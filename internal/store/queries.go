@@ -439,9 +439,13 @@ func (s *Store) DeleteTagMapping(ctx context.Context, id int64) error {
 // JobListOptions controls filtering and pagination for ListJobs. Any field
 // left at its zero value is treated as "no filter" — the canonical "show
 // everything" call is ListJobs(ctx, JobListOptions{Limit: N}).
+//
+// Statuses/Kinds are include-lists: nil/empty means "any", otherwise the row
+// must match one of the listed values. The UI uses all-selected-by-default
+// multi-select so users can untick a status to hide it.
 type JobListOptions struct {
-	Status    string // exact match; "" = any
-	Kind      string // "sonarr" | "radarr"; "" = any
+	Statuses  []string
+	Kinds     []string
 	ProfileID int64  // exact match; 0 = any
 	Search    string // case-insensitive substring match against title
 	Limit     int    // 0 = default 50; capped at 500
@@ -484,13 +488,17 @@ func (s *Store) ListJobs(ctx context.Context, opts JobListOptions) ([]JobRow, in
 func jobsFilterClause(opts JobListOptions) (string, []any) {
 	conds := make([]string, 0, 4)
 	args := make([]any, 0, 4)
-	if opts.Status != "" {
-		conds = append(conds, "status = ?")
-		args = append(args, opts.Status)
+	if len(opts.Statuses) > 0 {
+		conds = append(conds, "status IN ("+placeholders(len(opts.Statuses))+")")
+		for _, s := range opts.Statuses {
+			args = append(args, s)
+		}
 	}
-	if opts.Kind != "" {
-		conds = append(conds, "arr_kind = ?")
-		args = append(args, opts.Kind)
+	if len(opts.Kinds) > 0 {
+		conds = append(conds, "arr_kind IN ("+placeholders(len(opts.Kinds))+")")
+		for _, k := range opts.Kinds {
+			args = append(args, k)
+		}
 	}
 	if opts.ProfileID > 0 {
 		conds = append(conds, "profile_id = ?")
@@ -504,6 +512,13 @@ func jobsFilterClause(opts JobListOptions) (string, []any) {
 		return "", args
 	}
 	return "WHERE " + strings.Join(conds, " AND "), args
+}
+
+func placeholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return strings.Repeat("?,", n-1) + "?"
 }
 
 func (s *Store) GetJob(ctx context.Context, id int64) (*JobRow, error) {

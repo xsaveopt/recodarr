@@ -260,14 +260,36 @@ const bloatPolicyOptions = [
   { value: "retry_higher_crf", label: "Retry with higher CRF, then keep original" },
 ];
 
+// fillDefaults normalises a profile loaded from the API so the dialog shows
+// concrete selected values for every dropdown, not blanks. Older profiles
+// (and freshly-defaulted ones) often store "" for fields that semantically
+// mean "use the encoder default" — that empty value isn't in the option
+// list, so the Select would render blank. We resolve those to real values
+// from HandBrake's preset_builtin.json, validated against what HandBrakeCLI
+// reports for this build.
+function fillDefaults(p: Partial<Profile>): Partial<Profile> {
+  const ec = capsForEncoder(p.encoder);
+  const d = encoderDefaults[p.encoder ?? ""] ?? {};
+  if (!p.encoderPreset) p.encoderPreset = pickIfAvailable(d.preset, ec?.presets);
+  if (!p.encoderProfile) p.encoderProfile = pickIfAvailable(d.profile, ec?.profiles);
+  if (!p.encoderTune) p.encoderTune = pickIfAvailable(d.tune, ec?.tunes);
+  if (!p.encoderLevel) p.encoderLevel = pickIfAvailable(d.level, ec?.levels);
+  // Audio: an empty audioEncoder column in the DB historically meant "copy
+  // all" (passthrough). Make that explicit in the dropdown.
+  if (!p.audioEncoder) p.audioEncoder = "copy";
+  if (!p.rateControl) p.rateControl = "crf";
+  if (!p.quality && p.rateControl === "crf") p.quality = defaultQualityFor(p.encoder);
+  return p;
+}
+
 function startCreate() {
   validationError.value = null;
-  editing.value = defaultProfile();
+  editing.value = fillDefaults(defaultProfile());
 }
 
 function startEdit(row: Profile) {
   validationError.value = null;
-  editing.value = { ...row };
+  editing.value = fillDefaults({ ...row });
 }
 
 async function save() {
@@ -502,21 +524,21 @@ onMounted(load);
             <h3 class="block-title">Video output</h3>
             <div class="fields">
               <label class="field">
-                <span>Max width</span>
+                <span>Max width (px)</span>
                 <InputNumber
                   v-model="editing.maxWidth"
                   :min="0"
+                  :useGrouping="false"
                   placeholder="0 = no cap"
-                  suffix=" px"
                 />
               </label>
               <label class="field">
-                <span>Max height</span>
+                <span>Max height (px)</span>
                 <InputNumber
                   v-model="editing.maxHeight"
                   :min="0"
+                  :useGrouping="false"
                   placeholder="0 = no cap"
-                  suffix=" px"
                 />
               </label>
               <label class="field">
@@ -543,12 +565,12 @@ onMounted(load);
                 />
               </label>
               <label class="field">
-                <span>Bitrate</span>
+                <span>Bitrate (kbps)</span>
                 <InputNumber
                   v-model="editing.audioBitrate"
                   :min="0"
+                  :useGrouping="false"
                   placeholder="0 = auto"
-                  suffix=" kbps"
                 />
               </label>
               <label class="field">
@@ -611,36 +633,36 @@ onMounted(load);
                 />
               </label>
               <label class="field">
-                <span>Min savings required</span>
+                <span>Min savings required (%)</span>
                 <InputNumber
                   v-model="editing.bloatMinSavingsPercent"
                   :min="0"
                   :max="50"
                   :step="1"
-                  suffix=" %"
+                  :useGrouping="false"
                   placeholder="0"
                   :disabled="editing.bloatPolicy === 'off'"
                 />
               </label>
               <label class="field">
-                <span>Retry max</span>
+                <span>Retry max (tries)</span>
                 <InputNumber
                   v-model="editing.bloatRetryMax"
                   :min="0"
                   :max="10"
                   :step="1"
-                  suffix=" tries"
+                  :useGrouping="false"
                   :disabled="editing.bloatPolicy !== 'retry_higher_crf'"
                 />
               </label>
               <label class="field">
-                <span>Retry step</span>
+                <span>Retry step (CRF)</span>
                 <InputNumber
                   v-model="editing.bloatRetryStep"
                   :min="1"
                   :max="20"
                   :step="1"
-                  suffix=" CRF"
+                  :useGrouping="false"
                   :disabled="editing.bloatPolicy !== 'retry_higher_crf'"
                 />
               </label>
@@ -688,43 +710,43 @@ onMounted(load);
                 />
               </label>
               <label class="field">
-                <span>Bitrate ≤</span>
+                <span>Bitrate ≤ (MB/h)</span>
                 <InputNumber
                   v-model="editing.skipBitrateMBPerHour"
                   :min="0"
                   :step="100"
-                  suffix=" MB/h"
-                  placeholder="0"
+                  :useGrouping="false"
+                  placeholder="0 = disabled"
                 />
               </label>
               <label class="field">
-                <span>File size ≤</span>
+                <span>File size ≤ (MB)</span>
                 <InputNumber
                   v-model="editing.skipFileSizeMB"
                   :min="0"
                   :step="50"
-                  suffix=" MB"
-                  placeholder="0"
+                  :useGrouping="false"
+                  placeholder="0 = disabled"
                 />
               </label>
               <label class="field">
-                <span>Duration ≤</span>
+                <span>Duration ≤ (min)</span>
                 <InputNumber
                   v-model="editing.skipDurationMinutes"
                   :min="0"
                   :step="1"
-                  suffix=" min"
-                  placeholder="0"
+                  :useGrouping="false"
+                  placeholder="0 = disabled"
                 />
               </label>
               <label class="field">
-                <span>Height ≤</span>
+                <span>Height ≤ (px)</span>
                 <InputNumber
                   v-model="editing.skipHeightPx"
                   :min="0"
                   :step="120"
-                  suffix=" px"
-                  placeholder="0"
+                  :useGrouping="false"
+                  placeholder="0 = disabled"
                 />
               </label>
               <label class="field field-toggle">
