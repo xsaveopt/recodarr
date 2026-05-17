@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -435,21 +436,74 @@ func (s *Store) DeleteTagMapping(ctx context.Context, id int64) error {
 
 // --- jobs ---
 
-func (s *Store) ListJobs(ctx context.Context) ([]JobRow, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT `+jobCols+` FROM jobs ORDER BY id DESC LIMIT 500`)
+// JobListOptions controls filtering and pagination for ListJobs. Any field
+// left at its zero value is treated as "no filter" — the canonical "show
+// everything" call is ListJobs(ctx, JobListOptions{Limit: N}).
+type JobListOptions struct {
+	Status    string // exact match; "" = any
+	Kind      string // "sonarr" | "radarr"; "" = any
+	ProfileID int64  // exact match; 0 = any
+	Search    string // case-insensitive substring match against title
+	Limit     int    // 0 = default 50; capped at 500
+	Offset    int
+}
+
+func (s *Store) ListJobs(ctx context.Context, opts JobListOptions) ([]JobRow, int64, error) {
+	where, args := jobsFilterClause(opts)
+
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 50
+	} else if limit > 500 {
+		limit = 500
+	}
+
+	var total int64
+	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM jobs `+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	pageArgs := append(append([]any{}, args...), limit, opts.Offset)
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT `+jobCols+` FROM jobs `+where+` ORDER BY id DESC LIMIT ? OFFSET ?`, pageArgs...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer func() { _ = rows.Close() }()
-	var out []JobRow
+	out := make([]JobRow, 0, limit)
 	for rows.Next() {
 		r, err := scanJob(rows.Scan)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		out = append(out, r)
 	}
-	return out, rows.Err()
+	return out, total, rows.Err()
+}
+
+func jobsFilterClause(opts JobListOptions) (string, []any) {
+	conds := make([]string, 0, 4)
+	args := make([]any, 0, 4)
+	if opts.Status != "" {
+		conds = append(conds, "status = ?")
+		args = append(args, opts.Status)
+	}
+	if opts.Kind != "" {
+		conds = append(conds, "arr_kind = ?")
+		args = append(args, opts.Kind)
+	}
+	if opts.ProfileID > 0 {
+		conds = append(conds, "profile_id = ?")
+		args = append(args, opts.ProfileID)
+	}
+	if opts.Search != "" {
+		conds = append(conds, "lower(title) LIKE ?")
+		args = append(args, "%"+strings.ToLower(opts.Search)+"%")
+	}
+	if len(conds) == 0 {
+		return "", args
+	}
+	return "WHERE " + strings.Join(conds, " AND "), args
 }
 
 func (s *Store) GetJob(ctx context.Context, id int64) (*JobRow, error) {
@@ -600,10 +654,15 @@ func (s *Store) MarkJobFailed(ctx context.Context, id int64, msg, encodeLog stri
 	return err
 }
 
+// RetryJob re-queues any terminal job — failed, skipped, or done. Done jobs
+// are useful for testing profile changes against an already-encoded file (the
+// file on disk gets re-encoded with the current profile settings). The
+// sidecar marker is only consulted at webhook time, so a manual retry
+// bypasses it cleanly.
 func (s *Store) RetryJob(ctx context.Context, id int64) error {
 	_, err := s.DB.ExecContext(ctx,
 		`UPDATE jobs SET status='waiting_for_seed', error='', encode_log='', refresh_error='', attempts=0, started_at=NULL, finished_at=NULL, original_size=NULL, final_size=NULL, updated_at=CURRENT_TIMESTAMP
-		 WHERE id=? AND status IN ('failed','skipped')`,
+		 WHERE id=? AND status IN ('failed','skipped','done')`,
 		id)
 	return err
 }

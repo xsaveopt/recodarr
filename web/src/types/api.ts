@@ -127,6 +127,22 @@ export interface Job {
   finalSize?: number;
 }
 
+export interface JobListParams {
+  status?: string;
+  kind?: string;
+  profileId?: number;
+  q?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface JobsPage {
+  total: number;
+  limit: number;
+  offset: number;
+  jobs: Job[];
+}
+
 export interface JobDebug {
   jobId: number;
   status: JobStatus;

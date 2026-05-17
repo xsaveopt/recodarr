@@ -7,6 +7,8 @@ import type {
   InstanceTag,
   Job,
   JobDebug,
+  JobListParams,
+  JobsPage,
   JobStats,
   Profile,
   QbitInstance,
@@ -97,7 +99,17 @@ export const api = {
     remove: (id: number) => request<void>("DELETE", `/profiles/${id}`),
   },
   jobs: {
-    list: () => request<Job[]>("GET", "/jobs"),
+    list: (params: JobListParams = {}) => {
+      const q = new URLSearchParams();
+      if (params.status) q.set("status", params.status);
+      if (params.kind) q.set("kind", params.kind);
+      if (params.profileId) q.set("profileId", String(params.profileId));
+      if (params.q) q.set("q", params.q);
+      if (params.limit != null) q.set("limit", String(params.limit));
+      if (params.offset != null) q.set("offset", String(params.offset));
+      const qs = q.toString();
+      return request<JobsPage>("GET", `/jobs${qs ? `?${qs}` : ""}`);
+    },
     retry: (id: number) => request<Job>("POST", `/jobs/${id}/retry`),
     retryAllFailed: () => request<{ retried: number }>("POST", "/jobs/retry-failed"),
     cancel: (id: number) => request<{ status: string }>("POST", `/jobs/${id}/cancel`),

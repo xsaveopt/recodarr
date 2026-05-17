@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import DataTable from "primevue/datatable";
+import DataTable, { type DataTablePageEvent } from "primevue/datatable";
 import Column from "primevue/column";
 import Tag from "primevue/tag";
 import Button from "primevue/button";
@@ -13,20 +13,56 @@ import ProgressBar from "primevue/progressbar";
 import { api } from "@/api/client";
 import { useEncodeProgress } from "@/composables/useEncodeProgress";
 import { useNotify } from "@/composables/useNotify";
-import type { Job, JobDebug, JobStatus } from "@/types/api";
+import type { Job, JobDebug, JobStatus, Profile } from "@/types/api";
 
 const notify = useNotify();
 const { progressByJob } = useEncodeProgress();
 const route = useRoute();
 const router = useRouter();
 const jobs = ref<Job[]>([]);
+const totalRecords = ref(0);
+const loading = ref(false);
+const profiles = ref<Profile[]>([]);
 const busy = ref<Set<number>>(new Set());
-const titleFilter = ref("");
-// Status filter is URL-bound (?status=failed) so the dashboard tiles can deep-link
-// into a pre-filtered view, and so it survives page reloads.
+
+// URL-bound state so refresh / shareable links survive.
+const titleFilter = ref<string>((route.query.q as string) ?? "");
 const statusFilter = ref<string>((route.query.status as string) ?? "");
-watch(statusFilter, (v) => {
-  router.replace({ query: { ...route.query, status: v || undefined } });
+const kindFilter = ref<string>((route.query.kind as string) ?? "");
+const profileFilter = ref<number | null>(
+  route.query.profileId ? Number(route.query.profileId) : null,
+);
+const pageSize = ref<number>(
+  route.query.size ? Math.min(500, Math.max(10, Number(route.query.size))) : 50,
+);
+const pageOffset = ref<number>(route.query.offset ? Math.max(0, Number(route.query.offset)) : 0);
+
+function syncURL() {
+  router.replace({
+    query: {
+      ...route.query,
+      q: titleFilter.value || undefined,
+      status: statusFilter.value || undefined,
+      kind: kindFilter.value || undefined,
+      profileId: profileFilter.value || undefined,
+      offset: pageOffset.value > 0 ? String(pageOffset.value) : undefined,
+      size: pageSize.value !== 50 ? String(pageSize.value) : undefined,
+    },
+  });
+}
+
+// Debounce the free-text search so we don't fire a query per keystroke.
+let searchTimer: number | null = null;
+watch(titleFilter, () => {
+  if (searchTimer != null) window.clearTimeout(searchTimer);
+  searchTimer = window.setTimeout(() => {
+    pageOffset.value = 0;
+    void load();
+  }, 250);
+});
+watch([statusFilter, kindFilter, profileFilter], () => {
+  pageOffset.value = 0;
+  void load();
 });
 const logJob = ref<Job | null>(null);
 const debugJob = ref<Job | null>(null);
@@ -64,21 +100,57 @@ const statusOptions = [
   { value: "skipped", label: "Skipped (filtered)" },
 ];
 
-const filteredJobs = computed(() => {
-  let result = jobs.value;
-  if (statusFilter.value) {
-    result = result.filter((j) => j.status === statusFilter.value);
-  }
-  if (titleFilter.value.trim()) {
-    const q = titleFilter.value.trim().toLowerCase();
-    result = result.filter((j) => j.title.toLowerCase().includes(q));
-  }
-  return result;
+const kindOptions = [
+  { value: "", label: "All sources" },
+  { value: "sonarr", label: "Sonarr" },
+  { value: "radarr", label: "Radarr" },
+];
+
+const profileOptions = computed(() => [
+  { value: null, label: "All profiles" },
+  ...profiles.value.map((p) => ({ value: p.id, label: `${p.name} (${p.encoder})` })),
+]);
+
+const profileNameById = computed(() => {
+  const m = new Map<number, string>();
+  for (const p of profiles.value) m.set(p.id, p.name);
+  return m;
 });
 
 async function load() {
-  const res = await notify.tryRun(() => api.jobs.list(), "Couldn't load jobs");
-  if (res !== undefined) jobs.value = res ?? [];
+  loading.value = true;
+  try {
+    const res = await notify.tryRun(
+      () =>
+        api.jobs.list({
+          status: statusFilter.value || undefined,
+          kind: kindFilter.value || undefined,
+          profileId: profileFilter.value ?? undefined,
+          q: titleFilter.value.trim() || undefined,
+          limit: pageSize.value,
+          offset: pageOffset.value,
+        }),
+      "Couldn't load jobs",
+    );
+    if (res !== undefined) {
+      jobs.value = res?.jobs ?? [];
+      totalRecords.value = res?.total ?? 0;
+    }
+    syncURL();
+  } finally {
+    loading.value = false;
+  }
+}
+
+function onPage(ev: DataTablePageEvent) {
+  pageOffset.value = ev.first;
+  pageSize.value = ev.rows;
+  void load();
+}
+
+async function loadProfiles() {
+  const list = await notify.tryRun(() => api.profiles.list(), "Couldn't load profiles");
+  if (list) profiles.value = list;
 }
 
 async function withBusy<T>(id: number, fn: () => Promise<T>) {
@@ -189,6 +261,17 @@ function savings(j: Job) {
   return `${pct}%`;
 }
 
+function retryTooltip(status: string): string {
+  switch (status) {
+    case "skipped":
+      return "Re-queue (re-runs filters; current profile settings apply)";
+    case "done":
+      return "Re-encode the current file with the current profile settings (use to test profile changes)";
+    default:
+      return "Retry";
+  }
+}
+
 function shortTime(s?: string) {
   if (!s) return "—";
   const diff = Math.floor((Date.now() - new Date(s).getTime()) / 1000);
@@ -200,6 +283,7 @@ function shortTime(s?: string) {
 }
 
 onMounted(() => {
+  void loadProfiles();
   void load();
   timer = window.setInterval(load, 5000);
 });
@@ -240,15 +324,50 @@ onUnmounted(() => {
         optionValue="value"
         class="filter-select"
       />
+      <Select
+        v-model="kindFilter"
+        :options="kindOptions"
+        optionLabel="label"
+        optionValue="value"
+        class="filter-select"
+      />
+      <Select
+        v-model="profileFilter"
+        :options="profileOptions"
+        optionLabel="label"
+        optionValue="value"
+        class="filter-select"
+        :loading="profiles.length === 0"
+        showClear
+        placeholder="All profiles"
+      />
     </div>
 
-    <DataTable :value="filteredJobs" stripedRows size="small">
+    <DataTable
+      :value="jobs"
+      :loading="loading"
+      lazy
+      paginator
+      :rows="pageSize"
+      :first="pageOffset"
+      :totalRecords="totalRecords"
+      :rowsPerPageOptions="[25, 50, 100, 200]"
+      @page="onPage"
+      stripedRows
+      size="small"
+    >
       <template #empty><span class="muted">No jobs match the current filter.</span></template>
       <Column field="id" header="#" style="width: 4rem" />
       <Column field="title" header="Title" />
       <Column field="arrKind" header="Source" style="width: 7rem">
         <template #body="{ data }">
           <Tag :value="data.arrKind" :severity="data.arrKind === 'sonarr' ? 'info' : 'warn'" />
+        </template>
+      </Column>
+      <Column header="Profile" style="width: 10rem">
+        <template #body="{ data }">
+          <span v-if="data.profileId">{{ profileNameById.get(data.profileId) ?? `#${data.profileId}` }}</span>
+          <span v-else class="muted">—</span>
         </template>
       </Column>
       <Column field="status" header="Status" style="width: 12rem">
@@ -324,11 +443,11 @@ onUnmounted(() => {
             @click="cancel(data.id)"
           />
           <Button
-            v-if="data.status === 'failed' || data.status === 'skipped'"
+            v-if="data.status === 'failed' || data.status === 'skipped' || data.status === 'done'"
             text
             size="small"
             icon="pi pi-refresh"
-            :title="data.status === 'skipped' ? 'Re-queue (will re-run filters and encode)' : 'Retry'"
+            :title="retryTooltip(data.status)"
             :loading="busy.has(data.id)"
             @click="retry(data.id)"
           />

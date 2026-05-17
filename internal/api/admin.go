@@ -1095,18 +1095,54 @@ func rowToJobDTO(row store.JobRow) jobDTO {
 	return d
 }
 
+type jobsPageDTO struct {
+	Total  int64     `json:"total"`
+	Limit  int       `json:"limit"`
+	Offset int       `json:"offset"`
+	Jobs   []jobDTO  `json:"jobs"`
+}
+
 func listJobs(st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		rows, err := st.ListJobs(r.Context())
+		q := r.URL.Query()
+		opts := store.JobListOptions{
+			Status: q.Get("status"),
+			Kind:   q.Get("kind"),
+			Search: q.Get("q"),
+		}
+		if v := q.Get("profileId"); v != "" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+				opts.ProfileID = n
+			}
+		}
+		if v := q.Get("limit"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				opts.Limit = n
+			}
+		}
+		if v := q.Get("offset"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+				opts.Offset = n
+			}
+		}
+		rows, total, err := st.ListJobs(r.Context(), opts)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		out := make([]jobDTO, 0, len(rows))
+		jobs := make([]jobDTO, 0, len(rows))
 		for _, row := range rows {
-			out = append(out, rowToJobDTO(row))
+			jobs = append(jobs, rowToJobDTO(row))
 		}
-		writeJSON(w, http.StatusOK, out)
+		limit := opts.Limit
+		if limit <= 0 {
+			limit = 50
+		} else if limit > 500 {
+			limit = 500
+		}
+		writeJSON(w, http.StatusOK, jobsPageDTO{
+			Total: total, Limit: limit, Offset: opts.Offset, Jobs: jobs,
+		})
 	}
 }
 

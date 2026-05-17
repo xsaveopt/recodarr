@@ -74,12 +74,12 @@ async function togglePause() {
 async function load() {
   const res = await notify.tryRun(
     () =>
-      Promise.all([api.stats.get(), api.jobs.list(), api.worker.status(), api.status.get()]),
+      Promise.all([api.stats.get(), api.jobs.list({ limit: 12 }), api.worker.status(), api.status.get()]),
     "Couldn't load dashboard",
   );
   if (res) {
     stats.value = res[0];
-    recentJobs.value = res[1].slice(0, 12);
+    recentJobs.value = res[1].jobs;
     workerStatus.value = res[2];
     health.value = res[3];
     prune(res[2].encodingJobIds);
