@@ -29,7 +29,9 @@ export interface Profile {
   encoderProfile: string;
   encoderTune: string;
   encoderLevel: string;
+  rateControl: "crf" | "abr";
   quality: number;
+  videoBitrate: number;
   maxWidth: number;
   maxHeight: number;
   audioEncoder: string;

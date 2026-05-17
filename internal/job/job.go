@@ -642,14 +642,21 @@ func (w *Worker) encodeOne(encCtx, parentCtx context.Context, j store.JobRow) {
 
 	// Track retries (only meaningful for retry_higher_crf). currentQuality
 	// starts at the profile's RF and bumps by BloatRetryStep on each retry.
+	// In ABR mode the same step instead reduces VideoBitrate (kbps).
 	currentQuality := profile.Quality
+	currentBitrate := profile.VideoBitrate
+	isABR := strings.EqualFold(profile.RateControl, "abr")
 	maxRetries := 0
 	step := 0
 	if guard == "retry_higher_crf" {
 		maxRetries = profile.BloatRetryMax
 		step = profile.BloatRetryStep
 		if step <= 0 {
-			step = 3
+			if isABR {
+				step = 200 // kbps
+			} else {
+				step = 3 // CRF units
+			}
 		}
 	}
 	combinedLog := strings.Builder{}
@@ -660,8 +667,13 @@ func (w *Worker) encodeOne(encCtx, parentCtx context.Context, j store.JobRow) {
 	for {
 		attempt++
 		if attempt > 1 {
-			fmt.Fprintf(&combinedLog, "\n--- retry %d (CRF %d) ---\n", attempt-1, currentQuality)
-			slog.Debug("size-guard retry", "id", j.ID, "attempt", attempt, "quality", currentQuality)
+			if isABR {
+				fmt.Fprintf(&combinedLog, "\n--- retry %d (ABR %d kbps) ---\n", attempt-1, currentBitrate)
+				slog.Debug("size-guard retry", "id", j.ID, "attempt", attempt, "bitrate", currentBitrate)
+			} else {
+				fmt.Fprintf(&combinedLog, "\n--- retry %d (CRF %d) ---\n", attempt-1, currentQuality)
+				slog.Debug("size-guard retry", "id", j.ID, "attempt", attempt, "quality", currentQuality)
+			}
 		}
 		settings := handbrake.Settings{
 			Encoder:         profile.Encoder,
@@ -669,7 +681,9 @@ func (w *Worker) encodeOne(encCtx, parentCtx context.Context, j store.JobRow) {
 			EncoderProfile:  profile.EncoderProfile,
 			EncoderTune:     profile.EncoderTune,
 			EncoderLevel:    profile.EncoderLevel,
+			RateControl:     profile.RateControl,
 			Quality:         currentQuality,
+			VideoBitrate:    currentBitrate,
 			MaxWidth:        profile.MaxWidth,
 			MaxHeight:       profile.MaxHeight,
 			AudioEncoder:    profile.AudioEncoder,
@@ -740,7 +754,14 @@ func (w *Worker) encodeOne(encCtx, parentCtx context.Context, j store.JobRow) {
 		handbrake.DiscardTemp(lastResult.TempPath)
 
 		if guard == "retry_higher_crf" && attempt <= maxRetries {
-			currentQuality += step
+			if isABR {
+				currentBitrate -= step
+				if currentBitrate < 200 {
+					currentBitrate = 200 // floor; lower than this almost never decodes cleanly
+				}
+			} else {
+				currentQuality += step
+			}
 			continue
 		}
 
@@ -852,7 +873,11 @@ func writeSidecar(mediaPath, suffix string, j store.JobRow, p *store.ProfileRow,
 	if p.EncoderProfile != "" {
 		fmt.Fprintf(&b, "encoder_profile=%s\n", p.EncoderProfile)
 	}
-	fmt.Fprintf(&b, "quality=%d\n", p.Quality)
+	if strings.EqualFold(p.RateControl, "abr") {
+		fmt.Fprintf(&b, "rate_control=abr\nvideo_bitrate_kbps=%d\n", p.VideoBitrate)
+	} else {
+		fmt.Fprintf(&b, "rate_control=crf\nquality=%d\n", p.Quality)
+	}
 	fmt.Fprintf(&b, "container=%s\n", p.ContainerFormat)
 	fmt.Fprintf(&b, "original_size=%d\n", j.FileSize)
 	fmt.Fprintf(&b, "final_size=%d\n", finalSize)

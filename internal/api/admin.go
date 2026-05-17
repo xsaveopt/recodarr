@@ -87,7 +87,9 @@ type profileDTO struct {
 	EncoderProfile  string `json:"encoderProfile"`
 	EncoderTune     string `json:"encoderTune"`
 	EncoderLevel    string `json:"encoderLevel"`
+	RateControl     string `json:"rateControl"` // "crf" | "abr"
 	Quality         int    `json:"quality"`
+	VideoBitrate    int    `json:"videoBitrate"` // kbps; only used when rateControl=abr
 	MaxWidth        int    `json:"maxWidth"`
 	MaxHeight       int    `json:"maxHeight"`
 	AudioEncoder    string `json:"audioEncoder"`
@@ -117,7 +119,10 @@ func profileRowToDTO(r store.ProfileRow) profileDTO {
 		ID: r.ID, Name: r.Name, Encoder: r.Encoder,
 		EncoderPreset: r.EncoderPreset, EncoderProfile: r.EncoderProfile,
 		EncoderTune: r.EncoderTune, EncoderLevel: r.EncoderLevel,
-		Quality: r.Quality, MaxWidth: r.MaxWidth, MaxHeight: r.MaxHeight,
+		RateControl:  r.RateControl,
+		Quality:      r.Quality,
+		VideoBitrate: r.VideoBitrate,
+		MaxWidth:     r.MaxWidth, MaxHeight: r.MaxHeight,
 		AudioEncoder: r.AudioEncoder,
 		AudioBitrate: r.AudioBitrate, AudioMixdown: r.AudioMixdown,
 		SubtitleCopy: r.SubtitleCopy, TwoPass: r.TwoPass,
@@ -722,7 +727,10 @@ func upsertProfile(st *store.Store) http.HandlerFunc {
 			ID: d.ID, Name: d.Name, Encoder: d.Encoder,
 			EncoderPreset: d.EncoderPreset, EncoderProfile: d.EncoderProfile,
 			EncoderTune: d.EncoderTune, EncoderLevel: d.EncoderLevel,
-			Quality: d.Quality, MaxWidth: d.MaxWidth, MaxHeight: d.MaxHeight,
+			RateControl:  strings.ToLower(strings.TrimSpace(d.RateControl)),
+			Quality:      d.Quality,
+			VideoBitrate: d.VideoBitrate,
+			MaxWidth:     d.MaxWidth, MaxHeight: d.MaxHeight,
 			AudioEncoder: d.AudioEncoder,
 			AudioBitrate: d.AudioBitrate, AudioMixdown: d.AudioMixdown,
 			SubtitleCopy: d.SubtitleCopy, TwoPass: d.TwoPass,

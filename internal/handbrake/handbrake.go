@@ -58,7 +58,11 @@ type Settings struct {
 	EncoderProfile  string
 	EncoderTune     string
 	EncoderLevel    string
+	// RateControl picks the bitrate model: "crf" (default) for constant
+	// quality (uses Quality), or "abr" for average bitrate (uses VideoBitrate).
+	RateControl     string
 	Quality         int
+	VideoBitrate    int // kbps; only used when RateControl="abr"
 	MaxWidth        int
 	MaxHeight       int
 	AudioEncoder    string // "copy", "av_aac", "mp3", etc.; "" = HandBrake default
@@ -253,10 +257,6 @@ func buildArgs(input, output string, s Settings) []string {
 	if encoder == "" {
 		encoder = "x265"
 	}
-	quality := s.Quality
-	if quality == 0 {
-		quality = 22
-	}
 
 	format := s.ContainerFormat
 	if format == "" {
@@ -265,10 +265,20 @@ func buildArgs(input, output string, s Settings) []string {
 
 	args := []string{
 		"-e", encoder,
-		"-q", strconv.Itoa(quality),
 		"-f", format,
 		"-i", input,
 		"-o", output,
+	}
+	// Rate control. CRF emits -q; ABR emits --vb. Mutually exclusive — HandBrake
+	// errors if both are present.
+	if strings.EqualFold(s.RateControl, "abr") && s.VideoBitrate > 0 {
+		args = append(args, "--vb", strconv.Itoa(s.VideoBitrate))
+	} else {
+		quality := s.Quality
+		if quality == 0 {
+			quality = 22
+		}
+		args = append(args, "-q", strconv.Itoa(quality))
 	}
 	if s.EncoderPreset != "" {
 		args = append(args, "--encoder-preset", s.EncoderPreset)

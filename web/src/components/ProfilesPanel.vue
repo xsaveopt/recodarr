@@ -102,6 +102,11 @@ const audioMixdownOptions = [
   { value: "7point1", label: "7.1" },
 ];
 
+const rateControlOptions = [
+  { value: "crf", label: "CRF (constant quality)" },
+  { value: "abr", label: "ABR (average bitrate)" },
+];
+
 function defaultProfile(): Partial<Profile> {
   const first = caps.value.encoders[0]?.name ?? "x265";
   return {
@@ -111,7 +116,9 @@ function defaultProfile(): Partial<Profile> {
     encoderProfile: "",
     encoderTune: "",
     encoderLevel: "",
+    rateControl: "crf",
     quality: 22,
+    videoBitrate: 2500,
     maxWidth: 0,
     maxHeight: 0,
     audioEncoder: "",
@@ -208,8 +215,11 @@ onMounted(load);
     <DataTable :value="items" stripedRows size="small">
       <Column field="name" header="Name" />
       <Column field="encoder" header="Encoder" />
-      <Column header="Quality">
-        <template #body="{ data }">RF {{ data.quality }}</template>
+      <Column header="Rate">
+        <template #body="{ data }">
+          <span v-if="data.rateControl === 'abr'">{{ data.videoBitrate || 0 }} kbps</span>
+          <span v-else>RF {{ data.quality }}</span>
+        </template>
       </Column>
       <Column header="Resolution cap">
         <template #body="{ data }">{{ resolutionDisplay(data.maxWidth, data.maxHeight) }}</template>
@@ -267,8 +277,27 @@ onMounted(load);
             />
           </label>
           <label class="field field-narrow">
+            <span>Rate control</span>
+            <Select
+              v-model="editing.rateControl"
+              :options="rateControlOptions"
+              optionLabel="label"
+              optionValue="value"
+            />
+          </label>
+          <label v-if="editing.rateControl !== 'abr'" class="field field-narrow">
             <span>Quality (RF)</span>
             <InputNumber v-model="editing.quality" :min="1" :max="51" showButtons />
+          </label>
+          <label v-else class="field field-narrow">
+            <span>Bitrate (kbps)</span>
+            <InputNumber
+              v-model="editing.videoBitrate"
+              :min="100"
+              :max="100000"
+              :step="100"
+              showButtons
+            />
           </label>
         </section>
 
