@@ -1169,15 +1169,35 @@ func cancelJob(st *store.Store, wk workerClient) http.HandlerFunc {
 // job is stuck — particularly why a waiting_for_seed job hasn't transitioned.
 // Everything here is read-only and computed live; nothing is persisted.
 type jobDebugDTO struct {
-	JobID            int64           `json:"jobId"`
-	Status           string          `json:"status"`
-	DownloadID       string          `json:"downloadId"`
-	DownloadIDLength int             `json:"downloadIdLength"`
-	FilePath         string          `json:"filePath"`
-	Qbit             jobDebugQbitDTO `json:"qbit"`
-	WaitingForSeed   int64           `json:"waitingForSeedCount"`
-	SeedCheckLimit   int             `json:"seedCheckBatchLimit"`
-	StalledReason    string          `json:"stalledReason,omitempty"`
+	JobID            int64             `json:"jobId"`
+	Status           string            `json:"status"`
+	DownloadID       string            `json:"downloadId"`
+	DownloadIDLength int               `json:"downloadIdLength"`
+	FilePath         string            `json:"filePath"`
+	Attempts         int64             `json:"attempts"`
+	Qbit             jobDebugQbitDTO   `json:"qbit"`
+	WaitingForSeed   int64             `json:"waitingForSeedCount"`
+	SeedCheckLimit   int               `json:"seedCheckBatchLimit"`
+	StalledReason    string            `json:"stalledReason,omitempty"`
+	Encode           *jobDebugEncodeDTO `json:"encode,omitempty"`
+}
+
+// jobDebugEncodeDTO carries post-encode info for terminal jobs (done/failed/
+// skipped). Populated whenever original_size/final_size or an error/skip
+// reason exists on the row.
+type jobDebugEncodeDTO struct {
+	ProfileID       *int64  `json:"profileId,omitempty"`
+	ProfileName     string  `json:"profileName,omitempty"`
+	ProfileEncoder  string  `json:"profileEncoder,omitempty"`
+	OriginalBytes   *int64  `json:"originalBytes,omitempty"`
+	FinalBytes      *int64  `json:"finalBytes,omitempty"`
+	SavedBytes      *int64  `json:"savedBytes,omitempty"`
+	SavedPercent    *float64 `json:"savedPercent,omitempty"`
+	StartedAt       string  `json:"startedAt,omitempty"`
+	FinishedAt      string  `json:"finishedAt,omitempty"`
+	DurationSeconds *int64  `json:"durationSeconds,omitempty"`
+	Error           string  `json:"error,omitempty"`
+	RefreshError    string  `json:"refreshError,omitempty"`
 }
 
 type jobDebugQbitDTO struct {
@@ -1218,10 +1238,59 @@ func debugJob(st *store.Store) http.HandlerFunc {
 			DownloadID:       row.DownloadID,
 			DownloadIDLength: len(row.DownloadID),
 			FilePath:         row.FilePath,
+			Attempts:         row.Attempts,
 			SeedCheckLimit:   job.SeedCheckBatchLimit,
 		}
 		if stats, err := st.GetJobStats(r.Context()); err == nil {
 			out.WaitingForSeed = stats.WaitingForSeed
+		}
+
+		// Encode info: surfaced whenever the job has been worked at least
+		// once. The dialog already displays the qBit block; this gives the
+		// "what actually happened" half once the job has reached a terminal
+		// (or in-progress) state.
+		if row.StartedAt.Valid || row.OriginalSize.Valid || row.FinalSize.Valid ||
+			row.Error != "" || row.RefreshError != "" {
+			enc := &jobDebugEncodeDTO{
+				Error:        row.Error,
+				RefreshError: row.RefreshError,
+			}
+			if row.ProfileID.Valid {
+				pid := row.ProfileID.Int64
+				enc.ProfileID = &pid
+				if p, err := st.GetProfile(r.Context(), pid); err == nil && p != nil {
+					enc.ProfileName = p.Name
+					enc.ProfileEncoder = p.Encoder
+				}
+			}
+			if row.OriginalSize.Valid {
+				v := row.OriginalSize.Int64
+				enc.OriginalBytes = &v
+			}
+			if row.FinalSize.Valid {
+				v := row.FinalSize.Int64
+				enc.FinalBytes = &v
+			}
+			if row.OriginalSize.Valid && row.FinalSize.Valid {
+				saved := row.OriginalSize.Int64 - row.FinalSize.Int64
+				enc.SavedBytes = &saved
+				if row.OriginalSize.Int64 > 0 {
+					pct := float64(saved) / float64(row.OriginalSize.Int64) * 100
+					enc.SavedPercent = &pct
+				}
+			}
+			const ts = "2006-01-02T15:04:05Z07:00"
+			if row.StartedAt.Valid {
+				enc.StartedAt = row.StartedAt.Time.Format(ts)
+			}
+			if row.FinishedAt.Valid {
+				enc.FinishedAt = row.FinishedAt.Time.Format(ts)
+			}
+			if row.StartedAt.Valid && row.FinishedAt.Valid {
+				d := int64(row.FinishedAt.Time.Sub(row.StartedAt.Time).Seconds())
+				enc.DurationSeconds = &d
+			}
+			out.Encode = enc
 		}
 
 		qbitRow, err := st.FirstQbitInstance(r.Context())

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { computed } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import Tabs from "primevue/tabs";
 import TabList from "primevue/tablist";
 import Tab from "primevue/tab";
@@ -13,6 +15,21 @@ import WorkerPanel from "@/components/WorkerPanel.vue";
 import NotificationsPanel from "@/components/NotificationsPanel.vue";
 import LogsPanel from "@/components/LogsPanel.vue";
 import AgentPanel from "@/components/AgentPanel.vue";
+
+const route = useRoute();
+const router = useRouter();
+const validTabs = ["arr", "qbit", "profiles", "mappings", "worker", "notifications", "logs", "agent"] as const;
+type TabValue = (typeof validTabs)[number];
+
+const activeTab = computed<TabValue>({
+  get() {
+    const t = route.query.tab as string | undefined;
+    return (validTabs as readonly string[]).includes(t ?? "") ? (t as TabValue) : "arr";
+  },
+  set(v) {
+    router.replace({ query: { ...route.query, tab: v === "arr" ? undefined : v } });
+  },
+});
 </script>
 
 <template>
@@ -21,7 +38,7 @@ import AgentPanel from "@/components/AgentPanel.vue";
       <h1 class="page-title">Settings</h1>
       <p class="page-sub">Configure integrations, profiles, and the encoding worker.</p>
     </header>
-    <Tabs value="arr">
+    <Tabs v-model:value="activeTab">
       <TabList>
         <Tab value="arr">Sonarr / Radarr</Tab>
         <Tab value="qbit">qBittorrent</Tab>

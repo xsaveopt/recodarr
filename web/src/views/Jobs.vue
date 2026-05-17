@@ -174,6 +174,15 @@ function formatBytes(n?: number) {
   return `${v.toFixed(2)} ${units[i]}`;
 }
 
+function formatDuration(seconds?: number) {
+  if (seconds == null) return "—";
+  if (seconds < 60) return `${seconds}s`;
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  return h > 0 ? `${h}h ${m}m ${s}s` : `${m}m ${s}s`;
+}
+
 function savings(j: Job) {
   if (j.originalSize == null || j.finalSize == null) return "—";
   const pct = Math.round((1 - j.finalSize / j.originalSize) * 100);
@@ -315,16 +324,16 @@ onUnmounted(() => {
             @click="cancel(data.id)"
           />
           <Button
-            v-if="data.status === 'failed'"
+            v-if="data.status === 'failed' || data.status === 'skipped'"
             text
             size="small"
             icon="pi pi-refresh"
-            title="Retry"
+            :title="data.status === 'skipped' ? 'Re-queue (will re-run filters and encode)' : 'Retry'"
             :loading="busy.has(data.id)"
             @click="retry(data.id)"
           />
           <Button
-            v-if="data.status === 'done' || data.status === 'failed'"
+            v-if="data.status === 'done' || data.status === 'failed' || data.status === 'skipped'"
             text
             size="small"
             severity="danger"
@@ -428,7 +437,63 @@ onUnmounted(() => {
                 <dd v-else class="muted">(not performed)</dd>
               </template>
             </template>
+            <dt>Attempts</dt>
+            <dd>{{ debugInfo.attempts }}</dd>
           </dl>
+          <template v-if="debugInfo.encode">
+            <h4 class="debug-section">Encode</h4>
+            <dl class="debug-grid">
+              <template v-if="debugInfo.encode.profileName">
+                <dt>Profile</dt>
+                <dd>
+                  {{ debugInfo.encode.profileName }}
+                  <span class="muted">· {{ debugInfo.encode.profileEncoder }}</span>
+                  <span v-if="debugInfo.encode.profileId" class="muted"> · id {{ debugInfo.encode.profileId }}</span>
+                </dd>
+              </template>
+              <template v-if="debugInfo.encode.originalBytes !== undefined">
+                <dt>Original</dt>
+                <dd>{{ formatBytes(debugInfo.encode.originalBytes) }}</dd>
+              </template>
+              <template v-if="debugInfo.encode.finalBytes !== undefined">
+                <dt>Final</dt>
+                <dd>{{ formatBytes(debugInfo.encode.finalBytes) }}</dd>
+              </template>
+              <template v-if="debugInfo.encode.savedBytes !== undefined">
+                <dt>Saved</dt>
+                <dd>
+                  <span :class="(debugInfo.encode.savedBytes ?? 0) >= 0 ? '' : 'log-error inline'">
+                    {{ formatBytes(Math.abs(debugInfo.encode.savedBytes ?? 0)) }}
+                    <span v-if="debugInfo.encode.savedPercent !== undefined">
+                      ({{ (debugInfo.encode.savedPercent ?? 0).toFixed(1) }}%)
+                    </span>
+                    <span v-if="(debugInfo.encode.savedBytes ?? 0) < 0"> larger than source</span>
+                  </span>
+                </dd>
+              </template>
+              <template v-if="debugInfo.encode.startedAt">
+                <dt>Started</dt>
+                <dd>{{ new Date(debugInfo.encode.startedAt).toLocaleString() }}</dd>
+              </template>
+              <template v-if="debugInfo.encode.finishedAt">
+                <dt>Finished</dt>
+                <dd>
+                  {{ new Date(debugInfo.encode.finishedAt).toLocaleString() }}
+                  <span v-if="debugInfo.encode.durationSeconds !== undefined" class="muted">
+                    · took {{ formatDuration(debugInfo.encode.durationSeconds) }}
+                  </span>
+                </dd>
+              </template>
+              <template v-if="debugInfo.encode.error">
+                <dt>Error</dt>
+                <dd class="log-error inline">{{ debugInfo.encode.error }}</dd>
+              </template>
+              <template v-if="debugInfo.encode.refreshError">
+                <dt>*arr refresh</dt>
+                <dd class="log-error inline">{{ debugInfo.encode.refreshError }}</dd>
+              </template>
+            </dl>
+          </template>
         </template>
       </div>
       <template #footer>
@@ -553,6 +618,13 @@ onUnmounted(() => {
   border-radius: 4px;
   font-size: 0.9rem;
   line-height: 1.4;
+}
+.debug-section {
+  margin: 0.6rem 0 0.2rem;
+  font-size: 0.85rem;
+  color: var(--app-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 .debug-grid {
   display: grid;

@@ -100,15 +100,20 @@ onMounted(load);
     <p class="muted">
       Controls how frequently Recodarr checks for seed completion and starts encodes.
     </p>
-    <div class="form">
-      <div class="section-title">Pause encoding</div>
 
+    <!-- Pause is an instant kill-switch — deliberately outside the form +
+         Save flow below so toggling it actually pauses without an extra
+         click. The "Applies immediately" label is the contract. -->
+    <div class="instant-card" :class="{ paused }">
       <label class="pause-row">
-        <span>Pause</span>
+        <span class="pause-label">
+          <span>Pause encoding</span>
+          <span class="muted small">Applies immediately — no save needed</span>
+        </span>
         <span class="pause-control">
           <ToggleSwitch v-model="paused" @update:modelValue="togglePause" />
           <span class="muted small">{{
-            paused ? "Worker is paused — jobs continue to queue" : "Worker is running"
+            paused ? "Paused — jobs continue to queue" : "Worker is running"
           }}</span>
         </span>
       </label>
@@ -116,6 +121,12 @@ onMounted(load);
         Master kill-switch. When turned on, any in-flight encode is cancelled and re-queued (no
         attempt counted), and no new encodes will start until you turn it off again. Webhooks and
         the queue keep working normally.
+      </p>
+    </div>
+
+    <div class="form">
+      <p class="muted small form-intro">
+        Settings below are staged — click <strong>Save</strong> at the bottom to apply.
       </p>
 
       <div class="section-title">Poll interval</div>
@@ -229,6 +240,25 @@ onMounted(load);
   grid-template-columns: 10rem 1fr;
   align-items: center;
   gap: 0.75rem;
+}
+.instant-card {
+  border: 1px solid var(--app-border, rgba(255, 255, 255, 0.08));
+  border-radius: 6px;
+  padding: 0.85rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  background: var(--app-surface, transparent);
+}
+.instant-card.paused {
+  border-color: var(--app-warn-fg, #d39e00);
+}
+.pause-label {
+  display: flex;
+  flex-direction: column;
+}
+.form-intro {
+  margin: 0;
 }
 .section-title {
   font-size: 0.75rem;

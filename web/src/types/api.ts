@@ -149,9 +149,24 @@ export interface JobDebug {
     };
     lookupError?: string;
   };
+  attempts: number;
   waitingForSeedCount: number;
   seedCheckBatchLimit: number;
   stalledReason?: string;
+  encode?: {
+    profileId?: number;
+    profileName?: string;
+    profileEncoder?: string;
+    originalBytes?: number;
+    finalBytes?: number;
+    savedBytes?: number;
+    savedPercent?: number;
+    startedAt?: string;
+    finishedAt?: string;
+    durationSeconds?: number;
+    error?: string;
+    refreshError?: string;
+  };
 }
 
 export interface WorkerStatus {

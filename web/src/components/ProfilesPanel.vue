@@ -47,6 +47,100 @@ const levelOptions = computed(() => {
   return ec?.levels?.map((l) => ({ value: l, label: l })) ?? [];
 });
 
+// Encoder family — drives field visibility. Hardware encoders (NVENC/QSV/VCE/VAAPI)
+// have a very different config surface than software ones (x264/x265/SVT-AV1):
+// no real tunes, no real two-pass, sometimes no profile string. Hiding the
+// fields prevents footguns like "profile=main" on av1_nvenc which errors out.
+const hwPrefixes = ["nvenc_", "qsv_", "vce_", "vaapi_", "mf_", "videotoolbox_"];
+function isHardware(enc: string | undefined): boolean {
+  if (!enc) return false;
+  return hwPrefixes.some((p) => enc.startsWith(p));
+}
+function isAV1Hardware(enc: string | undefined): boolean {
+  return !!enc && (enc === "nvenc_av1" || enc === "qsv_av1" || enc === "vce_av1" || enc === "vaapi_av1");
+}
+
+const isHwEncoder = computed(() => isHardware(editing.value?.encoder));
+const isAv1Hw = computed(() => isAV1Hardware(editing.value?.encoder));
+
+// Per-encoder sensible defaults. HandBrake CLI's documented defaults vary; these
+// are what works well for general media re-encoding (1080p, mixed sources).
+// Encoder-specific defaults, lifted from HandBrake's preset_builtin.json so
+// new profiles match what HandBrake itself ships. The keys are the canonical
+// per-encoder picks; capsFallback() then snaps each to what HandBrakeCLI
+// actually reports for the current build (handles cases where, say, the
+// "medium" preset name varies, or the encoder is missing entirely).
+const encoderQualityDefaults: Record<string, number> = {
+  x264: 22,
+  x264_10bit: 22,
+  x265: 24,
+  x265_10bit: 24,
+  x265_12bit: 24,
+  svt_av1: 32,
+  svt_av1_10bit: 32,
+  nvenc_h264: 22,
+  nvenc_h265: 24,
+  nvenc_h265_10bit: 24,
+  nvenc_av1: 30,
+  qsv_h264: 22,
+  qsv_h265: 24,
+  qsv_h265_10bit: 24,
+  qsv_av1: 30,
+  vce_h264: 22,
+  vce_h265: 24,
+  vce_av1: 30,
+};
+function defaultQualityFor(enc: string | undefined): number {
+  if (!enc) return 22;
+  return encoderQualityDefaults[enc] ?? 22;
+}
+
+// Preset / profile / tune defaults — names that HandBrake's built-in presets
+// use. Looked up against the encoder's capabilities at apply-time so we never
+// set a value the encoder doesn't actually advertise.
+const encoderDefaults: Record<string, { preset?: string; profile?: string; tune?: string; level?: string }> = {
+  x264:            { preset: "medium",    profile: "main",   level: "auto", tune: "" },
+  x264_10bit:      { preset: "medium",    profile: "high10", level: "auto", tune: "" },
+  x265:            { preset: "medium",    profile: "main",   level: "auto", tune: "" },
+  x265_10bit:      { preset: "medium",    profile: "main10", level: "auto", tune: "" },
+  x265_12bit:      { preset: "medium",    profile: "main12", level: "auto", tune: "" },
+  svt_av1:         { preset: "6",         profile: "main",   level: "auto", tune: "" },
+  svt_av1_10bit:   { preset: "6",         profile: "main",   level: "auto", tune: "psnr" },
+  nvenc_h264:      { preset: "medium",    profile: "auto",   level: "auto" },
+  nvenc_h265:      { preset: "medium",    profile: "auto",   level: "auto" },
+  nvenc_h265_10bit:{ preset: "medium",    profile: "auto",   level: "auto" },
+  nvenc_av1:       { preset: "medium",    profile: "auto",   level: "auto" },
+  qsv_h264:        { preset: "speed",     profile: "auto",   level: "auto" },
+  qsv_h265:        { preset: "speed",     profile: "auto",   level: "auto" },
+  qsv_h265_10bit:  { preset: "speed",     profile: "auto",   level: "auto" },
+  qsv_av1:         { preset: "speed",     profile: "auto",   level: "auto" },
+  qsv_av1_10bit:   { preset: "speed",     profile: "auto",   level: "auto" },
+  vce_h264:        { preset: "balanced",  profile: "main",   level: "auto" },
+  vce_h265:        { preset: "balanced",  profile: "main",   level: "auto" },
+  vce_av1:         { preset: "balanced",  profile: "auto",   level: "auto" },
+  vce_av1_10bit:   { preset: "balanced",  profile: "auto",   level: "auto" },
+};
+
+function pickIfAvailable(value: string | undefined, available: string[] | undefined): string {
+  if (value === undefined || value === "") return "";
+  if (!available || available.length === 0) return value; // caps unknown — trust it
+  return available.includes(value) ? value : "";
+}
+
+// When the user flips to ABR mode on a profile that's never had a bitrate
+// set, seed a sensible default so the save doesn't silently fall back to CRF
+// (the backend now errors on ABR + bitrate=0, but the toggle is the obvious
+// spot to fix this proactively).
+watch(
+  () => editing.value?.rateControl,
+  (mode) => {
+    if (!editing.value) return;
+    if (mode === "abr" && (!editing.value.videoBitrate || editing.value.videoBitrate <= 0)) {
+      editing.value.videoBitrate = 2500;
+    }
+  },
+);
+
 // Reset encoder-specific fields ONLY when the user changes encoder mid-edit. The initial
 // transition undefined → <encoder name> happens when opening an existing profile, and
 // must NOT wipe the saved preset/tune/profile/level values.
@@ -55,10 +149,25 @@ watch(
   (newEnc, oldEnc) => {
     if (!editing.value) return;
     if (oldEnc === undefined || newEnc === oldEnc) return;
-    editing.value.encoderPreset = "";
-    editing.value.encoderProfile = "";
-    editing.value.encoderTune = "";
-    editing.value.encoderLevel = "";
+    // Seed encoder-specific fields with the values HandBrake itself ships
+    // for that encoder in its built-in presets. If HandBrake's caps report
+    // a different vocabulary (some builds omit options), fall back to empty
+    // so the user is shown a clean choice rather than an invalid one.
+    const ec = capsForEncoder(newEnc);
+    const d = encoderDefaults[newEnc ?? ""] ?? {};
+    editing.value.encoderPreset = pickIfAvailable(d.preset, ec?.presets);
+    editing.value.encoderProfile = pickIfAvailable(d.profile, ec?.profiles);
+    editing.value.encoderTune = pickIfAvailable(d.tune, ec?.tunes);
+    editing.value.encoderLevel = pickIfAvailable(d.level, ec?.levels);
+    // Snap quality to the new encoder's typical CRF/CQ default so users
+    // aren't stranded at "22" when switching to AV1 (where 30+ is normal).
+    editing.value.quality = defaultQualityFor(newEnc);
+    // HandBrake's own preset JSON sets VideoMultiPass=false for every
+    // hardware encoder — match that behavior. NVENC/QSV/VCE don't have a
+    // true second pass.
+    if (isHardware(newEnc)) {
+      editing.value.twoPass = false;
+    }
   },
 );
 
@@ -108,16 +217,21 @@ const rateControlOptions = [
 ];
 
 function defaultProfile(): Partial<Profile> {
-  const first = caps.value.encoders[0]?.name ?? "x265";
+  // Prefer x265 if it's available — it's the best general-purpose default for
+  // re-encoding a mixed library. Falls back to whatever HandBrake reports first.
+  const names = caps.value.encoders.map((e) => e.name);
+  const enc = names.find((n) => n === "x265") ?? names[0] ?? "x265";
+  const ec = capsForEncoder(enc);
+  const d = encoderDefaults[enc] ?? {};
   return {
     name: "",
-    encoder: first,
-    encoderPreset: "",
-    encoderProfile: "",
-    encoderTune: "",
-    encoderLevel: "",
+    encoder: enc,
+    encoderPreset: pickIfAvailable(d.preset, ec?.presets),
+    encoderProfile: pickIfAvailable(d.profile, ec?.profiles),
+    encoderTune: pickIfAvailable(d.tune, ec?.tunes),
+    encoderLevel: pickIfAvailable(d.level, ec?.levels),
     rateControl: "crf",
-    quality: 22,
+    quality: defaultQualityFor(enc),
     videoBitrate: 2500,
     maxWidth: 0,
     maxHeight: 0,
@@ -167,6 +281,10 @@ async function save() {
   }
   if (!editing.value.encoder) {
     validationError.value = "Encoder is required.";
+    return;
+  }
+  if (editing.value.rateControl === "abr" && (!editing.value.videoBitrate || editing.value.videoBitrate <= 0)) {
+    validationError.value = "ABR mode requires a video bitrate (kbps).";
     return;
   }
   const ok = await notify.tryRun(
@@ -320,45 +438,64 @@ onMounted(load);
                 <span>Preset</span>
                 <Select
                   v-model="editing.encoderPreset"
-                  :options="[{ value: '', label: '— default —' }, ...presetOptions]"
+                  :options="presetOptions"
                   optionLabel="label"
                   optionValue="value"
+                  placeholder="Encoder default"
+                  showClear
                 />
               </label>
-              <label class="field">
+              <label v-if="!isAv1Hw" class="field">
                 <span>Profile</span>
                 <Select
                   v-model="editing.encoderProfile"
-                  :options="[{ value: '', label: '— default —' }, ...profileOptions]"
+                  :options="profileOptions"
                   optionLabel="label"
                   optionValue="value"
+                  placeholder="Auto"
+                  showClear
                 />
               </label>
-              <label class="field">
+              <label v-if="!isHwEncoder && tuneOptions.length > 0" class="field">
                 <span>Tune</span>
                 <Select
                   v-model="editing.encoderTune"
-                  :options="[{ value: '', label: '— none —' }, ...tuneOptions]"
+                  :options="tuneOptions"
                   optionLabel="label"
                   optionValue="value"
+                  placeholder="None"
+                  showClear
                 />
               </label>
               <label class="field">
                 <span>Level</span>
                 <Select
                   v-model="editing.encoderLevel"
-                  :options="[{ value: '', label: '— auto —' }, ...levelOptions]"
+                  :options="levelOptions"
                   optionLabel="label"
                   optionValue="value"
+                  placeholder="Auto (recommended)"
+                  showClear
                 />
               </label>
-              <label class="field field-toggle">
-                <span>Two-pass</span>
+              <label
+                v-if="!isHwEncoder && editing.rateControl === 'abr'"
+                class="field field-toggle"
+              >
+                <span>Multi-pass</span>
                 <span class="toggle-row">
                   <ToggleSwitch v-model="editing.twoPass" />
-                  <span class="muted hint">Better quality/size ratio, ~2× encode time</span>
+                  <span class="muted hint">Two passes over the source for better bitrate distribution; ~2× encode time. HandBrake calls this "multi-pass" — the underlying flag is still --two-pass.</span>
                 </span>
               </label>
+              <p v-if="isAv1Hw" class="muted hint span-2">
+                AV1 hardware encoders accept only one profile (main); leave the profile field
+                empty — setting <code>main</code> as a string errors with current ffmpeg.
+              </p>
+              <p v-if="isHwEncoder && editing.rateControl === 'abr'" class="muted hint span-2">
+                Hardware encoders don't support true multi-pass — Recodarr uses single-pass ABR
+                with lookahead, which is what NVENC/QSV/VCE actually do internally.
+              </p>
             </div>
           </section>
 

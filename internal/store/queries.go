@@ -603,7 +603,7 @@ func (s *Store) MarkJobFailed(ctx context.Context, id int64, msg, encodeLog stri
 func (s *Store) RetryJob(ctx context.Context, id int64) error {
 	_, err := s.DB.ExecContext(ctx,
 		`UPDATE jobs SET status='waiting_for_seed', error='', encode_log='', refresh_error='', attempts=0, started_at=NULL, finished_at=NULL, original_size=NULL, final_size=NULL, updated_at=CURRENT_TIMESTAMP
-		 WHERE id=? AND status='failed'`,
+		 WHERE id=? AND status IN ('failed','skipped')`,
 		id)
 	return err
 }

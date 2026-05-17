@@ -135,6 +135,9 @@ type LineSink struct {
 // raw line-by-line output additionally goes to sink (if non-nil) so the caller can route it to a file.
 // onProgress, if non-nil, is called for each parsed progress line — keep it cheap and non-blocking.
 func Run(ctx context.Context, input string, s Settings, sink *LineSink, onProgress func(Progress)) (RunResult, error) {
+	if strings.EqualFold(s.RateControl, "abr") && s.VideoBitrate <= 0 {
+		return RunResult{}, fmt.Errorf("profile uses ABR rate control but video bitrate is 0 — set a bitrate in the profile")
+	}
 	if _, err := os.Stat(input); err != nil {
 		return RunResult{}, fmt.Errorf("stat input: %w", err)
 	}
@@ -270,8 +273,10 @@ func buildArgs(input, output string, s Settings) []string {
 		"-o", output,
 	}
 	// Rate control. CRF emits -q; ABR emits --vb. Mutually exclusive — HandBrake
-	// errors if both are present.
-	if strings.EqualFold(s.RateControl, "abr") && s.VideoBitrate > 0 {
+	// errors if both are present. ABR with no bitrate set would silently fall
+	// back to CRF — guard against that explicitly upstream (Run returns an
+	// error before getting here).
+	if strings.EqualFold(s.RateControl, "abr") {
 		args = append(args, "--vb", strconv.Itoa(s.VideoBitrate))
 	} else {
 		quality := s.Quality
