@@ -115,7 +115,14 @@ export const api = {
     cancel: (id: number) => request<{ status: string }>("POST", `/jobs/${id}/cancel`),
     debug: (id: number) => request<JobDebug>("GET", `/jobs/${id}/debug`),
     remove: (id: number) => request<void>("DELETE", `/jobs/${id}`),
-    clearTerminal: () => request<{ deleted: number }>("DELETE", "/jobs"),
+    clearTerminal: (statuses?: string[]) => {
+      const qs = statuses && statuses.length ? `?status=${encodeURIComponent(statuses.join(","))}` : "";
+      return request<{ deleted: number }>("DELETE", `/jobs${qs}`);
+    },
+    bulkDelete: (ids: number[]) =>
+      request<{ deleted: number }>("POST", "/jobs/bulk-delete", { ids }),
+    bulkRetry: (ids: number[]) =>
+      request<{ retried: number }>("POST", "/jobs/bulk-retry", { ids }),
   },
   worker: {
     status: () => request<WorkerStatus>("GET", "/worker/status"),

@@ -257,6 +257,8 @@ func registerAdminRoutes(r chi.Router, st *store.Store, w workerClient, hc *heal
 	r.Get("/jobs/{id}/debug", debugJob(st))
 	r.Delete("/jobs/{id}", deleteJob(st))
 	r.Delete("/jobs", deleteTerminalJobs(st))
+	r.Post("/jobs/bulk-delete", bulkDeleteJobs(st))
+	r.Post("/jobs/bulk-retry", bulkRetryJobs(st))
 }
 
 // --- settings ---
@@ -1427,12 +1429,52 @@ func deleteJob(st *store.Store) http.HandlerFunc {
 
 func deleteTerminalJobs(st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		n, err := st.DeleteTerminalJobs(r.Context())
+		// Optional ?status=done,failed,skipped — empty/missing keeps the old
+		// default of {done, failed, skipped}. Unknown values are dropped by
+		// the store layer.
+		statuses := splitNonEmpty(r.URL.Query().Get("status"))
+		n, err := st.DeleteTerminalJobs(r.Context(), statuses)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]int64{"deleted": n})
+	}
+}
+
+type bulkIDsBody struct {
+	IDs []int64 `json:"ids"`
+}
+
+func bulkDeleteJobs(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body bulkIDsBody
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "bad payload", http.StatusBadRequest)
+			return
+		}
+		n, err := st.DeleteJobsByIDs(r.Context(), body.IDs)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]int64{"deleted": n})
+	}
+}
+
+func bulkRetryJobs(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body bulkIDsBody
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "bad payload", http.StatusBadRequest)
+			return
+		}
+		n, err := st.RetryJobsByIDs(r.Context(), body.IDs)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]int64{"retried": n})
 	}
 }
 

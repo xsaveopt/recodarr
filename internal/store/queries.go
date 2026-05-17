@@ -697,13 +697,82 @@ func (s *Store) DeleteJob(ctx context.Context, id int64) error {
 	return err
 }
 
-func (s *Store) DeleteTerminalJobs(ctx context.Context) (int64, error) {
-	res, err := s.DB.ExecContext(ctx, `DELETE FROM jobs WHERE status IN ('done','failed','skipped')`)
+// terminalStatuses is the canonical set DeleteTerminalJobs / DeleteJobsByIDs
+// will touch. Encoding jobs are never deleted here — cancel them first.
+var terminalStatuses = []string{"done", "failed", "skipped", "waiting_for_seed", "ready"}
+
+func isTerminalDeletable(s string) bool {
+	for _, t := range terminalStatuses {
+		if t == s {
+			return true
+		}
+	}
+	return false
+}
+
+// DeleteTerminalJobs removes jobs in any of the given statuses. When statuses
+// is empty, defaults to the historical {done, failed, skipped} set so old
+// callers keep working. Any status not in terminalStatuses is silently dropped
+// — we never delete encoding jobs through this path.
+func (s *Store) DeleteTerminalJobs(ctx context.Context, statuses []string) (int64, error) {
+	if len(statuses) == 0 {
+		statuses = []string{"done", "failed", "skipped"}
+	}
+	clean := make([]any, 0, len(statuses))
+	for _, st := range statuses {
+		if isTerminalDeletable(st) {
+			clean = append(clean, st)
+		}
+	}
+	if len(clean) == 0 {
+		return 0, nil
+	}
+	q := `DELETE FROM jobs WHERE status IN (` + placeholders(len(clean)) + `)`
+	res, err := s.DB.ExecContext(ctx, q, clean...)
 	if err != nil {
 		return 0, err
 	}
-	n, err := res.RowsAffected()
-	return n, err
+	return res.RowsAffected()
+}
+
+// DeleteJobsByIDs removes the listed jobs, but only those in a deletable
+// (non-encoding) status. Encoding jobs are skipped silently — the count
+// reflects what actually got removed.
+func (s *Store) DeleteJobsByIDs(ctx context.Context, ids []int64) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	args := make([]any, 0, len(ids))
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	q := `DELETE FROM jobs WHERE id IN (` + placeholders(len(ids)) + `) AND status != 'encoding'`
+	res, err := s.DB.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// RetryJobsByIDs re-queues every terminal (failed/skipped/done) job in the
+// list. Encoding/waiting/ready jobs are skipped silently.
+func (s *Store) RetryJobsByIDs(ctx context.Context, ids []int64) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	args := make([]any, 0, len(ids))
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	q := `UPDATE jobs SET status='waiting_for_seed', error='', encode_log='', refresh_error='',
+	      attempts=0, started_at=NULL, finished_at=NULL, original_size=NULL, final_size=NULL,
+	      updated_at=CURRENT_TIMESTAMP
+	      WHERE id IN (` + placeholders(len(ids)) + `) AND status IN ('failed','skipped','done')`
+	res, err := s.DB.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 func (s *Store) FirstQbitInstance(ctx context.Context) (*QbitInstanceRow, error) {

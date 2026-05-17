@@ -5,6 +5,7 @@ import DataTable, { type DataTablePageEvent } from "primevue/datatable";
 import Column from "primevue/column";
 import Tag from "primevue/tag";
 import Button from "primevue/button";
+import Checkbox from "primevue/checkbox";
 import InputText from "primevue/inputtext";
 import Select from "primevue/select";
 import MultiSelect from "primevue/multiselect";
@@ -25,6 +26,22 @@ const totalRecords = ref(0);
 const loading = ref(false);
 const profiles = ref<Profile[]>([]);
 const busy = ref<Set<number>>(new Set());
+const selectedJobs = ref<Job[]>([]);
+const bulkBusy = ref(false);
+
+// Statuses the user can pick in the Clear History dialog. Encoding jobs are
+// never deletable from here — cancel them first.
+const CLEARABLE_STATUSES = ["done", "failed", "skipped", "waiting_for_seed", "ready"] as const;
+const clearDialogOpen = ref(false);
+const clearStatuses = ref<string[]>(["done", "failed", "skipped"]);
+
+const selectedIds = computed(() => selectedJobs.value.map((j) => j.id));
+const selectedDeletable = computed(() =>
+  selectedJobs.value.filter((j) => j.status !== "encoding").length,
+);
+const selectedRetryable = computed(() =>
+  selectedJobs.value.filter((j) => j.status === "failed" || j.status === "skipped" || j.status === "done").length,
+);
 
 // All known values — the multi-select defaults to all of them checked, so
 // "show everything" is the visual default and the user un-checks to filter out.
@@ -229,22 +246,69 @@ function remove(id: number) {
   });
 }
 
-function clearAll() {
+function openClearDialog() {
+  clearStatuses.value = ["done", "failed", "skipped"];
+  clearDialogOpen.value = true;
+}
+
+async function clearByStatus() {
+  if (clearStatuses.value.length === 0) {
+    notify.error("Pick at least one status to clear");
+    return;
+  }
+  const picked = [...clearStatuses.value];
+  const res = await notify.tryRun(
+    () => api.jobs.clearTerminal(picked),
+    "Couldn't clear history",
+  );
+  if (res !== undefined) {
+    if (res.deleted === 0) notify.info("Nothing to clear");
+    else notify.success(`Cleared ${res.deleted} entry/entries from history`);
+    clearDialogOpen.value = false;
+    await load();
+  }
+}
+
+async function bulkDelete() {
+  const ids = selectedIds.value;
+  if (ids.length === 0) return;
   notify.confirmDelete({
-    name: "all done and failed jobs",
-    header: "Clear job history?",
-    acceptLabel: "Clear history",
+    name: `${selectedDeletable.value} selected job(s)`,
+    header: "Remove selected from history?",
+    acceptLabel: "Remove from history",
     message:
-      "Removes every done and failed entry from this list. Files on disk are NOT touched, and Sonarr/Radarr are not contacted. In-flight and queued jobs are kept.",
+      "Removes the selected entries from this list. Files on disk are NOT touched, and Sonarr/Radarr are not contacted. Encoding jobs in the selection are skipped — cancel them first.",
     onAccept: async () => {
-      const res = await notify.tryRun(() => api.jobs.clearTerminal(), "Couldn't clear history");
-      if (res) {
-        if (res.deleted === 0) notify.info("Nothing to clear");
-        else notify.success(`Cleared ${res.deleted} entry/entries from history`);
-        await load();
+      bulkBusy.value = true;
+      try {
+        const res = await notify.tryRun(() => api.jobs.bulkDelete(ids), "Bulk delete failed");
+        if (res !== undefined) {
+          notify.success(`Removed ${res.deleted} entry/entries from history`);
+          selectedJobs.value = [];
+          await load();
+        }
+      } finally {
+        bulkBusy.value = false;
       }
     },
   });
+}
+
+async function bulkRetry() {
+  const ids = selectedIds.value;
+  if (ids.length === 0) return;
+  bulkBusy.value = true;
+  try {
+    const res = await notify.tryRun(() => api.jobs.bulkRetry(ids), "Bulk retry failed");
+    if (res !== undefined) {
+      if (res.retried === 0) notify.info("Nothing eligible to retry in the selection");
+      else notify.success(`Re-queued ${res.retried} job(s)`);
+      selectedJobs.value = [];
+      await load();
+    }
+  } finally {
+    bulkBusy.value = false;
+  }
 }
 
 const severities: Record<JobStatus, "info" | "warn" | "success" | "danger" | "secondary"> = {
@@ -331,9 +395,9 @@ onUnmounted(() => {
           text
           severity="danger"
           icon="pi pi-trash"
-          label="Clear history"
-          title="Remove all done and failed entries from this list. Files on disk are not touched."
-          @click="clearAll"
+          label="Clear history…"
+          title="Pick which statuses to clear from this list. Files on disk are not touched."
+          @click="openClearDialog"
         />
         <Button text icon="pi pi-refresh" label="Refresh" @click="load" />
       </div>
@@ -371,11 +435,44 @@ onUnmounted(() => {
       />
     </div>
 
+    <div v-if="selectedJobs.length > 0" class="bulk-bar">
+      <span class="bulk-count">
+        <strong>{{ selectedJobs.length }}</strong> selected
+        <span v-if="selectedDeletable < selectedJobs.length" class="muted small">
+          · {{ selectedJobs.length - selectedDeletable }} encoding (skipped on delete)
+        </span>
+      </span>
+      <Button
+        text
+        size="small"
+        icon="pi pi-refresh"
+        :label="`Retry ${selectedRetryable}`"
+        :disabled="selectedRetryable === 0 || bulkBusy"
+        :loading="bulkBusy"
+        title="Re-queue every failed / skipped / done job in the selection"
+        @click="bulkRetry"
+      />
+      <Button
+        text
+        size="small"
+        severity="danger"
+        icon="pi pi-trash"
+        :label="`Delete ${selectedDeletable}`"
+        :disabled="selectedDeletable === 0 || bulkBusy"
+        :loading="bulkBusy"
+        title="Remove selected entries from history (files on disk untouched)"
+        @click="bulkDelete"
+      />
+      <Button text size="small" label="Clear selection" @click="selectedJobs = []" />
+    </div>
+
     <DataTable
+      v-model:selection="selectedJobs"
       :value="jobs"
       :loading="loading"
       lazy
       paginator
+      dataKey="id"
       :rows="pageSize"
       :first="pageOffset"
       :totalRecords="totalRecords"
@@ -385,6 +482,7 @@ onUnmounted(() => {
       size="small"
     >
       <template #empty><span class="muted">No jobs match the current filter.</span></template>
+      <Column selectionMode="multiple" headerStyle="width: 2.5rem" />
       <Column field="id" header="#" style="width: 4rem" />
       <Column field="title" header="Title" />
       <Column field="arrKind" header="Source" style="width: 7rem">
@@ -492,6 +590,37 @@ onUnmounted(() => {
         </template>
       </Column>
     </DataTable>
+
+    <Dialog
+      v-model:visible="clearDialogOpen"
+      modal
+      header="Clear history"
+      :style="{ width: '32rem', maxWidth: '95vw' }"
+    >
+      <div class="clear-dialog">
+        <p class="muted small">
+          Pick which job statuses to remove from this list. Files on disk are NOT touched, and
+          Sonarr/Radarr are not contacted. Encoding jobs are never deletable here — cancel them
+          first.
+        </p>
+        <div class="clear-options">
+          <label v-for="s in CLEARABLE_STATUSES" :key="s" class="clear-row">
+            <Checkbox v-model="clearStatuses" :value="s" />
+            <span>{{ s }}</span>
+          </label>
+        </div>
+      </div>
+      <template #footer>
+        <Button text label="Cancel" @click="clearDialogOpen = false" />
+        <Button
+          severity="danger"
+          icon="pi pi-trash"
+          label="Clear selected statuses"
+          :disabled="clearStatuses.length === 0"
+          @click="clearByStatus"
+        />
+      </template>
+    </Dialog>
 
     <Dialog
       :visible="logJob !== null"
@@ -696,6 +825,43 @@ onUnmounted(() => {
 }
 .filter-select-narrow {
   width: 10rem;
+}
+.bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  margin-bottom: 0.5rem;
+  background: var(--rc-surface-2);
+  border: 1px solid var(--rc-border);
+  border-radius: var(--rc-r-md);
+  font-size: 0.85rem;
+}
+.bulk-count {
+  margin-right: auto;
+}
+.small {
+  font-size: 0.78rem;
+}
+.clear-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.clear-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.clear-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.9rem;
+}
+.clear-row span {
+  font-family: var(--rc-font-mono);
+  font-size: 0.82rem;
 }
 .error {
   background: var(--app-error-bg);
