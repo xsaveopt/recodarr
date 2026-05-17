@@ -189,8 +189,7 @@ const containerOptions = [
 ];
 
 const audioEncoderOptions = [
-  { value: "", label: "— copy all (default) —" },
-  { value: "copy", label: "copy" },
+  { value: "copy", label: "Copy all (passthrough)" },
   { value: "av_aac", label: "AAC (av_aac)" },
   { value: "fdk_aac", label: "AAC (fdk_aac)" },
   { value: "mp3", label: "MP3" },
@@ -203,7 +202,6 @@ const audioEncoderOptions = [
 ];
 
 const audioMixdownOptions = [
-  { value: "", label: "— source channels —" },
   { value: "mono", label: "Mono" },
   { value: "stereo", label: "Stereo" },
   { value: "5point1", label: "5.1" },
@@ -235,7 +233,7 @@ function defaultProfile(): Partial<Profile> {
     videoBitrate: 2500,
     maxWidth: 0,
     maxHeight: 0,
-    audioEncoder: "",
+    audioEncoder: "copy",
     audioBitrate: 0,
     audioMixdown: "",
     subtitleCopy: true,
@@ -560,6 +558,8 @@ onMounted(load);
                   :options="audioMixdownOptions"
                   optionLabel="label"
                   optionValue="value"
+                  placeholder="Keep source channels"
+                  showClear
                 />
               </label>
               <label class="field field-toggle">
@@ -571,7 +571,7 @@ onMounted(load);
               </label>
             </div>
             <p class="muted hint span-2">
-              Empty encoder = copy all audio tracks (bitrate/mixdown ignored).
+              "Copy all (passthrough)" leaves audio tracks untouched (bitrate/mixdown ignored).
             </p>
           </section>
 

@@ -618,7 +618,16 @@ func (w *Worker) encodeOne(encCtx, parentCtx context.Context, j store.JobRow) {
 		return
 	}
 
-	slog.Info("encoding", "id", j.ID, "title", j.Title, "path", j.FilePath, "encoder", profile.Encoder)
+	rateAttr := slog.Int("quality", profile.Quality)
+	rateLabel := "crf"
+	if strings.EqualFold(profile.RateControl, "abr") {
+		rateAttr = slog.Int("bitrate_kbps", profile.VideoBitrate)
+		rateLabel = "abr"
+	}
+	slog.Info("encoding",
+		"id", j.ID, "title", j.Title, "path", j.FilePath,
+		"encoder", profile.Encoder, "rate_control", rateLabel, rateAttr,
+		"profile_id", j.ProfileID.Int64, "profile_name", profile.Name)
 	onProgress := func(p handbrake.Progress) {
 		w.broadcast(ProgressEvent{JobID: j.ID, Title: j.Title, Percent: p.Percent, FPS: p.FPS, ETA: p.ETA})
 	}

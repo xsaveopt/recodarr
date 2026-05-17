@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -129,6 +130,18 @@ func (r *Runner) encode(parent context.Context, id string) {
 	// agent's deterministic OutputPath ourselves below.
 	settings := js.Request.Settings
 	settings.NoCommit = true
+	// Log what we actually received so the operator can confirm rate control
+	// arrived intact (the most common drift between server and agent is a
+	// mismatched binary version that silently strips unknown fields).
+	rateLabel := "crf"
+	rateVal := settings.Quality
+	if strings.EqualFold(settings.RateControl, "abr") {
+		rateLabel = "abr"
+		rateVal = settings.VideoBitrate
+	}
+	slog.Info("agent: encode start",
+		"id", id, "encoder", settings.Encoder,
+		"rate_control", rateLabel, "rate_value", rateVal)
 
 	sink := &handbrake.LineSink{Stdout: logFile, Stderr: logFile}
 	onProgress := func(p handbrake.Progress) {
