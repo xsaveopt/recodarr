@@ -43,10 +43,14 @@ func QueryCaps() Caps {
 
 // VersionString returns the output of HandBrakeCLI --version, or an error message if not found.
 func VersionString() string {
-	out, err := exec.Command("HandBrakeCLI", "--version").CombinedOutput()
+	// stdout only — stderr carries libhb init noise (nvenc/qsv probes, thread starts).
+	out, err := exec.Command("HandBrakeCLI", "--version").Output()
 	v := strings.TrimSpace(string(out))
 	if err != nil && v == "" {
 		return "(HandBrakeCLI not found)"
+	}
+	if i := strings.IndexByte(v, '\n'); i >= 0 {
+		v = strings.TrimSpace(v[:i])
 	}
 	return v
 }
