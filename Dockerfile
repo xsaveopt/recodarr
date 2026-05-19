@@ -128,8 +128,10 @@ RUN groupadd -r recodarr && useradd -r -g recodarr -u 10001 -d /data -s /usr/sbi
     && chown -R recodarr:recodarr /data
 
 COPY --from=go-builder /out/recodarr /usr/local/bin/recodarr
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 8080
 VOLUME ["/data"]
 USER recodarr
-ENTRYPOINT ["/usr/local/bin/recodarr"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
