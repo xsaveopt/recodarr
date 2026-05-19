@@ -39,4 +39,33 @@ else
     fi
 fi
 
+# HandBrake QSV-on-Linux workaround: libhb/hwaccel.c passes the FFmpeg QSV
+# child device hint as a bare integer ("0", "1", ...). That's correct for the
+# Windows d3d11va child but on Linux the child is VAAPI, which interprets the
+# string as a filesystem path and calls open("0", O_RDWR). The open fails and
+# the encode dies with "No VA display found for device 0".
+#
+# We work around it by setting the worker's CWD to a directory where "0",
+# "1", ... are symlinks to the matching /dev/dri/renderD12N nodes. FFmpeg's
+# open() then resolves to the right render node, libva initializes, QSV runs.
+#
+# Track HandBrake upstream — when their Linux path passes a proper /dev/dri
+# path, this can go away.
+QSV_CWD=/tmp/recodarr-qsv-cwd
+if mkdir -p "$QSV_CWD" 2>/dev/null; then
+    linked=""
+    for render in /dev/dri/renderD*; do
+        [ -e "$render" ] || continue
+        num=$(basename "$render" | sed 's/renderD//')
+        idx=$((num - 128))
+        if ln -sfn "$render" "$QSV_CWD/$idx" 2>/dev/null; then
+            linked="$linked $idx→$(basename "$render")"
+        fi
+    done
+    if [ -n "$linked" ]; then
+        log "QSV child_device workaround symlinks:$linked (cwd=$QSV_CWD)"
+        cd "$QSV_CWD" || log "could not chdir to $QSV_CWD — workaround inactive"
+    fi
+fi
+
 exec /usr/local/bin/recodarr "$@"
