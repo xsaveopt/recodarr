@@ -13,16 +13,30 @@
 
 set -e
 
-if [ -z "${LIBVA_DRIVER_NAME:-}" ] && [ -e /dev/dri/renderD128 ]; then
+log() { echo "[entrypoint] $*" >&2; }
+
+if [ -n "${LIBVA_DRIVER_NAME:-}" ]; then
+    log "LIBVA_DRIVER_NAME already set to '$LIBVA_DRIVER_NAME' (from env); leaving as-is"
+elif [ ! -e /dev/dri/renderD128 ]; then
+    log "no /dev/dri/renderD128 — skipping GPU vendor detection (NVENC or no GPU)"
+else
+    detected=""
     for dev in /sys/class/drm/renderD*/device/vendor; do
         [ -r "$dev" ] || continue
         vendor=$(cat "$dev" 2>/dev/null || true)
         case "$vendor" in
-            0x8086) export LIBVA_DRIVER_NAME=iHD ;;     # Intel
-            0x1002) export LIBVA_DRIVER_NAME=radeonsi ;; # AMD
+            0x8086) detected=iHD ;;      # Intel
+            0x1002) detected=radeonsi ;; # AMD
+            *)      log "unknown GPU vendor '$vendor' at $dev — leaving LIBVA_DRIVER_NAME unset" ;;
         esac
-        break
+        [ -n "$detected" ] && break
     done
+    if [ -n "$detected" ]; then
+        export LIBVA_DRIVER_NAME="$detected"
+        log "detected GPU vendor → LIBVA_DRIVER_NAME=$detected"
+    else
+        log "no readable /sys/class/drm/renderD*/device/vendor entries — leaving LIBVA_DRIVER_NAME unset"
+    fi
 fi
 
 exec /usr/local/bin/recodarr "$@"
