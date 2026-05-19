@@ -40,7 +40,10 @@ const eligibleInstances = computed(() =>
 const filteredItems = computed(() => {
   const needle = titleFilter.value.trim().toLowerCase();
   return items.value.filter((it) => {
-    if (hideProcessed.value && it.doneJobs > 0) return false;
+    // "Already known" = either completed or still queued/encoding. Both should
+    // hide by default since queueing them again would just be a no-op (the
+    // backend's HasActiveJob check would skip the insert).
+    if (hideProcessed.value && (it.doneJobs > 0 || it.activeJobs > 0)) return false;
     if (needle && !it.title.toLowerCase().includes(needle)) return false;
     return true;
   });
@@ -179,7 +182,7 @@ onMounted(async () => {
         />
         <label class="checkbox-row">
           <Checkbox v-model="hideProcessed" :binary="true" />
-          <span>Hide items with completed jobs</span>
+          <span>Hide items already queued or completed</span>
         </label>
         <Button
           icon="pi pi-refresh"
@@ -217,8 +220,7 @@ onMounted(async () => {
           your mappings, then refresh.
         </template>
         <template v-else>
-          All tagged items are already processed. Uncheck "Hide items with completed jobs"
-          to re-queue.
+          All tagged items are already queued or processed. Uncheck the filter to re-queue.
         </template>
       </div>
       <DataTable
