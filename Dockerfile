@@ -98,12 +98,15 @@ RUN echo "deb http://deb.debian.org/debian trixie main contrib non-free non-free
         # whatever render node is passed in, so we install one driver per vendor
         # and they co-exist harmlessly (only the matching one ever gets loaded).
         libva-drm2 libva2 vainfo \
-        # Intel: libvpl2 is the oneVPL runtime (QSV). intel-media-va-driver-non-free
-        # is the iHD driver — required for Arc AV1 and any Gen ≥9 QSV path.
+        # Intel QSV stack. libvpl2 is just the oneVPL dispatcher; on its own
+        # it finds zero implementations and HandBrake returns MFX session = -9.
+        # The actual GPU runtime is libmfx-gen (Gen ≥9, includes Arc); libmfxgen1
+        # is the trixie package name. intel-media-va-driver-non-free is the iHD
+        # driver — required for Arc AV1 (encode + decode) and any Gen ≥9 QSV.
         # Note: GuC/HuC firmware for Arc must be installed on the HOST
         # (firmware-misc-nonfree on Debian, linux-firmware on most distros) —
         # the container can't inject firmware into the host kernel.
-        libvpl2 \
+        libvpl2 libmfxgen1 \
         intel-media-va-driver-non-free \
         # AMD: Mesa's gallium VAAPI driver (radeonsi). Covers VCN encode on
         # RDNA/Vega and decode on older parts. AMD has no equivalent of QSV;
