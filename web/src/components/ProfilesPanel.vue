@@ -243,6 +243,7 @@ function defaultProfile(): Partial<Profile> {
     framerate: "",
     skipCodecs: "",
     skipBitrateMBPerHour: 0,
+    skipBitrateUnit: "mb_per_hour",
     skipFileSizeMB: 0,
     skipDurationMinutes: 0,
     skipHeightPx: 0,
@@ -253,6 +254,11 @@ function defaultProfile(): Partial<Profile> {
     bloatMinSavingsPercent: 0,
   };
 }
+
+const bitrateUnitOptions = [
+  { value: "mb_per_hour", label: "MB/h" },
+  { value: "kbps", label: "kbps" },
+];
 
 const bloatPolicyOptions = [
   { value: "off", label: "Off — always keep encoded file" },
@@ -713,14 +719,24 @@ onMounted(load);
                 />
               </label>
               <label class="field">
-                <span>Bitrate ≤ (MB/h)</span>
-                <InputNumber
-                  v-model="editing.skipBitrateMBPerHour"
-                  :min="0"
-                  :step="100"
-                  :useGrouping="false"
-                  placeholder="0 = disabled"
-                />
+                <span>Bitrate ≤</span>
+                <div class="bitrate-row">
+                  <InputNumber
+                    v-model="editing.skipBitrateMBPerHour"
+                    :min="0"
+                    :step="editing.skipBitrateUnit === 'kbps' ? 500 : 100"
+                    :useGrouping="false"
+                    placeholder="0 = disabled"
+                    class="bitrate-input"
+                  />
+                  <Select
+                    v-model="editing.skipBitrateUnit"
+                    :options="bitrateUnitOptions"
+                    optionLabel="label"
+                    optionValue="value"
+                    class="bitrate-unit"
+                  />
+                </div>
               </label>
               <label class="field">
                 <span>File size ≤ (MB)</span>
@@ -903,6 +919,18 @@ onMounted(load);
 }
 .field-toggle {
   justify-content: flex-end;
+}
+.bitrate-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: stretch;
+}
+.bitrate-row .bitrate-input {
+  flex: 1;
+  min-width: 0;
+}
+.bitrate-row .bitrate-unit {
+  flex: 0 0 6rem;
 }
 
 /* Make every input fill its slot so the grid columns line up cleanly */

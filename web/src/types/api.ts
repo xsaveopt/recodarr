@@ -45,6 +45,7 @@ export interface Profile {
   // Pre-encode filters; zero/empty = inactive.
   skipCodecs: string;
   skipBitrateMBPerHour: number;
+  skipBitrateUnit: "mb_per_hour" | "kbps";
   skipFileSizeMB: number;
   skipDurationMinutes: number;
   skipHeightPx: number;

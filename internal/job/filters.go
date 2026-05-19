@@ -61,9 +61,18 @@ func evaluateFilters(ctx context.Context, p *store.ProfileRow, j store.JobRow) (
 	}
 
 	if p.SkipBitrateMBPerHour > 0 {
-		mbph := pr.MBPerHour()
-		if mbph > 0 && mbph <= float64(p.SkipBitrateMBPerHour) {
-			return true, fmt.Sprintf("source bitrate %.0f MB/hour ≤ %d MB/hour", mbph, p.SkipBitrateMBPerHour)
+		if p.SkipBitrateUnit == "kbps" {
+			if pr.BitrateBps > 0 {
+				kbps := pr.BitrateBps / 1000
+				if kbps <= int64(p.SkipBitrateMBPerHour) {
+					return true, fmt.Sprintf("source bitrate %d kbps ≤ %d kbps", kbps, p.SkipBitrateMBPerHour)
+				}
+			}
+		} else {
+			mbph := pr.MBPerHour()
+			if mbph > 0 && mbph <= float64(p.SkipBitrateMBPerHour) {
+				return true, fmt.Sprintf("source bitrate %.0f MB/hour ≤ %d MB/hour", mbph, p.SkipBitrateMBPerHour)
+			}
 		}
 	}
 

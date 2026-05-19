@@ -103,7 +103,8 @@ type profileDTO struct {
 	Framerate       string `json:"framerate"`
 	// Pre-encode filters; zero/empty = inactive.
 	SkipCodecs           string `json:"skipCodecs"`
-	SkipBitrateMBPerHour int    `json:"skipBitrateMBPerHour"`
+	SkipBitrateMBPerHour int    `json:"skipBitrateMBPerHour"` // value; unit determines interpretation
+	SkipBitrateUnit      string `json:"skipBitrateUnit"`      // "mb_per_hour" (default) | "kbps"
 	SkipFileSizeMB       int    `json:"skipFileSizeMB"`
 	SkipDurationMinutes  int    `json:"skipDurationMinutes"`
 	SkipHeightPx         int    `json:"skipHeightPx"`
@@ -131,6 +132,7 @@ func profileRowToDTO(r store.ProfileRow) profileDTO {
 		Framerate: r.Framerate,
 		SkipCodecs:             r.SkipCodecs,
 		SkipBitrateMBPerHour:   r.SkipBitrateMBPerHour,
+		SkipBitrateUnit:        r.SkipBitrateUnit,
 		SkipFileSizeMB:         r.SkipFileSizeMB,
 		SkipDurationMinutes:    r.SkipDurationMinutes,
 		SkipHeightPx:           r.SkipHeightPx,
@@ -1007,6 +1009,7 @@ func upsertProfile(st *store.Store) http.HandlerFunc {
 			Framerate:            d.Framerate,
 			SkipCodecs:             strings.ToLower(strings.TrimSpace(d.SkipCodecs)),
 			SkipBitrateMBPerHour:   d.SkipBitrateMBPerHour,
+			SkipBitrateUnit:        d.SkipBitrateUnit,
 			SkipFileSizeMB:         d.SkipFileSizeMB,
 			SkipDurationMinutes:    d.SkipDurationMinutes,
 			SkipHeightPx:           d.SkipHeightPx,
