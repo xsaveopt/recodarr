@@ -56,7 +56,9 @@ const bulkProfileId = ref<number | null>(null);
 
 const bulkProfileOptions = computed(() => [
   { id: 0, name: "— Clear profile —" },
-  ...profiles.value.map((p) => ({ id: p.id, name: p.name })),
+  // Only allow assigning non-deleted profiles. Deleted ones still show up in
+  // the read-only profile column for historical jobs but can't be picked here.
+  ...profiles.value.filter((p) => !p.deleted).map((p) => ({ id: p.id, name: p.name })),
 ]);
 
 // All known values — the multi-select defaults to all of them checked, so
@@ -162,14 +164,20 @@ const kindOptions = [
   { value: "radarr", label: "Radarr" },
 ];
 
+// Hide deleted profiles from the filter dropdown — they can't be picked for new
+// work, only viewed in history.
 const profileOptions = computed(() => [
   { value: null, label: "All profiles" },
-  ...profiles.value.map((p) => ({ value: p.id, label: `${p.name} (${p.encoder})` })),
+  ...profiles.value
+    .filter((p) => !p.deleted)
+    .map((p) => ({ value: p.id, label: `${p.name} (${p.encoder})` })),
 ]);
 
 const profileNameById = computed(() => {
   const m = new Map<number, string>();
-  for (const p of profiles.value) m.set(p.id, p.name);
+  for (const p of profiles.value) {
+    m.set(p.id, p.deleted ? `${p.name} (deleted)` : p.name);
+  }
   return m;
 });
 
@@ -205,7 +213,13 @@ function onPage(ev: DataTablePageEvent) {
 }
 
 async function loadProfiles() {
-  const list = await notify.tryRun(() => api.profiles.list(), "Couldn't load profiles");
+  // includeDeleted: historical jobs may reference profiles the user has since
+  // removed; we still want to render the profile name (with a "(deleted)"
+  // suffix) instead of falling back to "#42".
+  const list = await notify.tryRun(
+    () => api.profiles.list({ includeDeleted: true }),
+    "Couldn't load profiles",
+  );
   if (list) profiles.value = list;
 }
 

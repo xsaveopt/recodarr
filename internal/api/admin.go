@@ -50,6 +50,7 @@ type arrInstanceDTO struct {
 	WebhookSecret string `json:"webhookSecret,omitempty"` // write-only; copyable URL is enough
 	HasAPIKey     bool   `json:"hasApiKey"`
 	HasSecret     bool   `json:"hasWebhookSecret"`
+	Deleted       bool   `json:"deleted"`
 }
 
 func (d arrInstanceDTO) toRow() store.ArrInstanceRow {
@@ -68,6 +69,7 @@ func arrRowToDTO(r store.ArrInstanceRow) arrInstanceDTO {
 		Enabled:   r.Enabled,
 		HasAPIKey: r.APIKey != "",
 		HasSecret: r.WebhookSecret != "",
+		Deleted:   r.DeletedAt.Valid,
 	}
 }
 
@@ -114,6 +116,7 @@ type profileDTO struct {
 	BloatRetryMax          int    `json:"bloatRetryMax"`
 	BloatRetryStep         int    `json:"bloatRetryStep"`
 	BloatMinSavingsPercent int    `json:"bloatMinSavingsPercent"`
+	Deleted                bool   `json:"deleted"`
 }
 
 func profileRowToDTO(r store.ProfileRow) profileDTO {
@@ -141,6 +144,7 @@ func profileRowToDTO(r store.ProfileRow) profileDTO {
 		BloatRetryMax:          r.BloatRetryMax,
 		BloatRetryStep:         r.BloatRetryStep,
 		BloatMinSavingsPercent: r.BloatMinSavingsPercent,
+		Deleted:                r.DeletedAt.Valid,
 	}
 }
 
@@ -451,7 +455,15 @@ func isValidHHMM(s string) bool {
 
 func listArrInstances(st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		rows, err := st.ListArrInstances(r.Context())
+		var (
+			rows []store.ArrInstanceRow
+			err  error
+		)
+		if r.URL.Query().Get("includeDeleted") == "true" {
+			rows, err = st.ListArrInstancesIncludingDeleted(r.Context())
+		} else {
+			rows, err = st.ListArrInstances(r.Context())
+		}
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -800,9 +812,15 @@ func queueArrLibrary(st *store.Store) http.HandlerFunc {
 					FilePath:      clean,
 					FileSize:      f.Size,
 					ProfileID:     sql.NullInt64{Int64: meta.mapping.ProfileID, Valid: true},
-					Status:        string(job.StatusReady),
-					Tags:          string(tagsJSON),
-					Source:        "backfill",
+					// Same state machine as webhook-driven jobs. We don't know
+					// a DownloadID for backfill, so checkSeeding will auto-
+					// transition to 'ready' on the next tick without polling
+					// qBit (job.go:398). Keeping the same entry state means
+					// any future "match torrent by path" logic plugs in
+					// without a flow split.
+					Status: string(job.StatusWaitingForSeed),
+					Tags:   string(tagsJSON),
+					Source: "backfill",
 				}
 				newID, err := enqueueIfNew(r.Context(), st, jr)
 				if err != nil {
@@ -974,7 +992,15 @@ func testQbitInstance(st *store.Store) http.HandlerFunc {
 
 func listProfiles(st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		rows, err := st.ListProfiles(r.Context())
+		var (
+			rows []store.ProfileRow
+			err  error
+		)
+		if r.URL.Query().Get("includeDeleted") == "true" {
+			rows, err = st.ListProfilesIncludingDeleted(r.Context())
+		} else {
+			rows, err = st.ListProfiles(r.Context())
+		}
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

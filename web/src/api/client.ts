@@ -98,7 +98,11 @@ export const api = {
       request<{ ok: boolean; error?: string }>("POST", `/qbit-instances/${id}/test`),
   },
   profiles: {
-    list: () => request<Profile[]>("GET", "/profiles"),
+    list: (opts: { includeDeleted?: boolean } = {}) =>
+      request<Profile[]>(
+        "GET",
+        opts.includeDeleted ? "/profiles?includeDeleted=true" : "/profiles",
+      ),
     upsert: (p: Partial<Profile> & { name: string; encoder: string }) =>
       request<Profile>("POST", "/profiles", p),
     remove: (id: number) => request<void>("DELETE", `/profiles/${id}`),

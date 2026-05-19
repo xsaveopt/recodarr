@@ -202,6 +202,9 @@ const audioEncoderOptions = [
 ];
 
 const audioMixdownOptions = [
+  // Empty string = omit --mixdown from HandBrake args. HandBrake then matches
+  // the source channel layout for the chosen encoder where possible.
+  { value: "", label: "Keep source layout" },
   { value: "mono", label: "Mono" },
   { value: "stereo", label: "Stereo" },
   { value: "5point1", label: "5.1" },
@@ -589,8 +592,6 @@ onMounted(load);
                   :options="audioMixdownOptions"
                   optionLabel="label"
                   optionValue="value"
-                  placeholder="Keep source channels"
-                  showClear
                 />
               </label>
               <label class="field field-toggle">

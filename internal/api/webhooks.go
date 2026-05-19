@@ -165,6 +165,9 @@ func loadArrInstance(ctx context.Context, st *store.Store, id int64, expectedKin
 	if inst.Kind != expectedKind {
 		return nil, errors.New("instance kind mismatch")
 	}
+	if inst.DeletedAt.Valid {
+		return nil, errors.New("instance deleted")
+	}
 	if !inst.Enabled {
 		return nil, errors.New("instance disabled")
 	}

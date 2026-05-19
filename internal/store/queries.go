@@ -20,6 +20,10 @@ type ArrInstanceRow struct {
 	APIKey        string
 	Enabled       bool
 	WebhookSecret string
+	// DeletedAt is set when the row has been soft-deleted. List endpoints
+	// hide soft-deleted rows by default; GetArrInstance still returns them so
+	// historical job rows can resolve their instance name.
+	DeletedAt sql.NullTime
 }
 
 type QbitInstanceRow struct {
@@ -69,6 +73,11 @@ type ProfileRow struct {
 	BloatRetryMax           int
 	BloatRetryStep          int
 	BloatMinSavingsPercent  int
+	// DeletedAt is set when the profile has been soft-deleted. List endpoints
+	// hide soft-deleted profiles by default; GetProfile still returns them so
+	// historical job rows resolve a name. Tag mappings pointing at a deleted
+	// profile are dropped at delete time (see DeleteProfile).
+	DeletedAt               sql.NullTime
 }
 
 type TagMappingRow struct {
@@ -166,38 +175,61 @@ func (s *Store) GetAllSettings(ctx context.Context) (map[string]string, error) {
 
 // --- arr instances ---
 
+const arrInstanceCols = `id,kind,name,url,api_key,enabled,webhook_secret,deleted_at`
+
+func scanArrInstance(scan func(...any) error) (ArrInstanceRow, error) {
+	var r ArrInstanceRow
+	var enabled int
+	if err := scan(&r.ID, &r.Kind, &r.Name, &r.URL, &r.APIKey, &enabled, &r.WebhookSecret, &r.DeletedAt); err != nil {
+		return r, err
+	}
+	r.Enabled = enabled != 0
+	return r, nil
+}
+
+// ListArrInstances returns non-deleted instances. Use ListArrInstancesIncludingDeleted
+// when history lookups need access to soft-deleted rows.
 func (s *Store) ListArrInstances(ctx context.Context) ([]ArrInstanceRow, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,kind,name,url,api_key,enabled,webhook_secret FROM arr_instances ORDER BY id`)
+	return s.listArrInstances(ctx, false)
+}
+
+func (s *Store) ListArrInstancesIncludingDeleted(ctx context.Context) ([]ArrInstanceRow, error) {
+	return s.listArrInstances(ctx, true)
+}
+
+func (s *Store) listArrInstances(ctx context.Context, includeDeleted bool) ([]ArrInstanceRow, error) {
+	q := `SELECT ` + arrInstanceCols + ` FROM arr_instances`
+	if !includeDeleted {
+		q += ` WHERE deleted_at IS NULL`
+	}
+	q += ` ORDER BY id`
+	rows, err := s.DB.QueryContext(ctx, q)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	var out []ArrInstanceRow
 	for rows.Next() {
-		var r ArrInstanceRow
-		var enabled int
-		if err := rows.Scan(&r.ID, &r.Kind, &r.Name, &r.URL, &r.APIKey, &enabled, &r.WebhookSecret); err != nil {
+		r, err := scanArrInstance(rows.Scan)
+		if err != nil {
 			return nil, err
 		}
-		r.Enabled = enabled != 0
 		out = append(out, r)
 	}
 	return out, rows.Err()
 }
 
+// GetArrInstance returns a row by ID even if it's been soft-deleted, so jobs
+// referencing a deleted instance can still resolve a name.
 func (s *Store) GetArrInstance(ctx context.Context, id int64) (*ArrInstanceRow, error) {
-	var r ArrInstanceRow
-	var enabled int
-	err := s.DB.QueryRowContext(ctx,
-		`SELECT id,kind,name,url,api_key,enabled,webhook_secret FROM arr_instances WHERE id = ?`, id).
-		Scan(&r.ID, &r.Kind, &r.Name, &r.URL, &r.APIKey, &enabled, &r.WebhookSecret)
+	r, err := scanArrInstance(s.DB.QueryRowContext(ctx,
+		`SELECT `+arrInstanceCols+` FROM arr_instances WHERE id = ?`, id).Scan)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	r.Enabled = enabled != 0
 	return &r, nil
 }
 
@@ -253,8 +285,11 @@ func newWebhookSecret() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+// DeleteArrInstance soft-deletes the row by setting deleted_at. Existing job
+// history still resolves the instance name via GetArrInstance.
 func (s *Store) DeleteArrInstance(ctx context.Context, id int64) error {
-	_, err := s.DB.ExecContext(ctx, `DELETE FROM arr_instances WHERE id=?`, id)
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE arr_instances SET deleted_at = CURRENT_TIMESTAMP WHERE id=? AND deleted_at IS NULL`, id)
 	return err
 }
 
@@ -313,14 +348,14 @@ func (s *Store) DeleteQbitInstance(ctx context.Context, id int64) error {
 
 // --- profiles ---
 
-const profileCols = `id,name,encoder,encoder_preset,encoder_profile,encoder_tune,encoder_level,rate_control,quality,video_bitrate,max_width,max_height,subtitle_copy,two_pass,container_format,extra_args,framerate,audio_encoder,audio_bitrate,audio_mixdown,skip_codecs,skip_bitrate_mb_per_hour,skip_bitrate_unit,skip_file_size_mb,skip_duration_minutes,skip_height_px,skip_hdr,bloat_policy,bloat_retry_max,bloat_retry_step,bloat_min_savings_percent`
+const profileCols = `id,name,encoder,encoder_preset,encoder_profile,encoder_tune,encoder_level,rate_control,quality,video_bitrate,max_width,max_height,subtitle_copy,two_pass,container_format,extra_args,framerate,audio_encoder,audio_bitrate,audio_mixdown,skip_codecs,skip_bitrate_mb_per_hour,skip_bitrate_unit,skip_file_size_mb,skip_duration_minutes,skip_height_px,skip_hdr,bloat_policy,bloat_retry_max,bloat_retry_step,bloat_min_savings_percent,deleted_at`
 
 func scanProfile(scan func(...any) error) (ProfileRow, error) {
 	var r ProfileRow
 	var subtitleCopy, twoPass, skipHDR int
 	err := scan(&r.ID, &r.Name, &r.Encoder, &r.EncoderPreset, &r.EncoderProfile, &r.EncoderTune, &r.EncoderLevel, &r.RateControl, &r.Quality, &r.VideoBitrate, &r.MaxWidth, &r.MaxHeight, &subtitleCopy, &twoPass, &r.ContainerFormat, &r.ExtraArgs, &r.Framerate, &r.AudioEncoder, &r.AudioBitrate, &r.AudioMixdown,
 		&r.SkipCodecs, &r.SkipBitrateMBPerHour, &r.SkipBitrateUnit, &r.SkipFileSizeMB, &r.SkipDurationMinutes, &r.SkipHeightPx, &skipHDR,
-		&r.BloatPolicy, &r.BloatRetryMax, &r.BloatRetryStep, &r.BloatMinSavingsPercent)
+		&r.BloatPolicy, &r.BloatRetryMax, &r.BloatRetryStep, &r.BloatMinSavingsPercent, &r.DeletedAt)
 	r.SubtitleCopy = subtitleCopy != 0
 	r.TwoPass = twoPass != 0
 	r.SkipHDR = skipHDR != 0
@@ -330,8 +365,23 @@ func scanProfile(scan func(...any) error) (ProfileRow, error) {
 	return r, err
 }
 
+// ListProfiles returns non-deleted profiles. Use ListProfilesIncludingDeleted
+// when populating a name-lookup map for historical jobs.
 func (s *Store) ListProfiles(ctx context.Context) ([]ProfileRow, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT `+profileCols+` FROM profiles ORDER BY id`)
+	return s.listProfiles(ctx, false)
+}
+
+func (s *Store) ListProfilesIncludingDeleted(ctx context.Context) ([]ProfileRow, error) {
+	return s.listProfiles(ctx, true)
+}
+
+func (s *Store) listProfiles(ctx context.Context, includeDeleted bool) ([]ProfileRow, error) {
+	q := `SELECT ` + profileCols + ` FROM profiles`
+	if !includeDeleted {
+		q += ` WHERE deleted_at IS NULL`
+	}
+	q += ` ORDER BY id`
+	rows, err := s.DB.QueryContext(ctx, q)
 	if err != nil {
 		return nil, err
 	}
@@ -387,9 +437,25 @@ func (s *Store) UpsertProfile(ctx context.Context, r ProfileRow) (int64, error) 
 	return r.ID, err
 }
 
+// DeleteProfile soft-deletes the profile and hard-deletes any tag_mappings
+// that pointed at it. Mappings are pure routing config (no historical value),
+// so dropping them keeps webhook resolution from queueing more work against a
+// profile the user just removed. The profile row itself is retained so job
+// history can still surface a name.
 func (s *Store) DeleteProfile(ctx context.Context, id int64) error {
-	_, err := s.DB.ExecContext(ctx, `DELETE FROM profiles WHERE id=?`, id)
-	return err
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM tag_mappings WHERE profile_id = ?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE profiles SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // --- tag mappings ---

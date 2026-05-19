@@ -10,6 +10,7 @@ export interface ArrInstance {
   enabled: boolean;
   hasApiKey: boolean;
   hasWebhookSecret: boolean;
+  deleted: boolean;
 }
 
 export interface QbitInstance {
@@ -55,6 +56,7 @@ export interface Profile {
   bloatRetryMax: number;
   bloatRetryStep: number;
   bloatMinSavingsPercent: number;
+  deleted: boolean;
 }
 
 export interface TagMapping {
