@@ -76,6 +76,170 @@ func (c *Client) Tags(ctx context.Context) ([]Tag, error) {
 	return tags, nil
 }
 
+// LibraryItem is a single series or movie discovered via the REST API (not the
+// webhook). One Item per series/movie regardless of how many files it has;
+// FileCount and TotalSize are aggregates for display.
+//
+// TagIDs are integer IDs as returned by /api/v3/series and /api/v3/movie.
+// (Note: this is unlike *arr webhook payloads, which serialize the same field
+// as label strings — see Item.ParentTags.)
+type LibraryItem struct {
+	ID        int64
+	Title     string
+	Path      string
+	TagIDs    []int64
+	FileCount int
+	TotalSize int64
+}
+
+// LibraryFile is a single playable file under a series/movie. ParentID is the
+// seriesId / movieId; ID is the episodeFileId / movieFileId.
+type LibraryFile struct {
+	ID           int64
+	ParentID     int64
+	Path         string
+	RelativePath string
+	Size         int64
+}
+
+// sonarrSeries is the subset of SeriesResource we need.
+type sonarrSeries struct {
+	ID         int64   `json:"id"`
+	Title      string  `json:"title"`
+	Path       string  `json:"path"`
+	Tags       []int64 `json:"tags"`
+	Statistics struct {
+		EpisodeFileCount int   `json:"episodeFileCount"`
+		SizeOnDisk       int64 `json:"sizeOnDisk"`
+	} `json:"statistics"`
+}
+
+// sonarrEpisodeFile is the subset of EpisodeFileResource we need.
+type sonarrEpisodeFile struct {
+	ID           int64  `json:"id"`
+	SeriesID     int64  `json:"seriesId"`
+	Path         string `json:"path"`
+	RelativePath string `json:"relativePath"`
+	Size         int64  `json:"size"`
+}
+
+// radarrMovie is the subset of MovieResource we need.
+type radarrMovie struct {
+	ID         int64   `json:"id"`
+	Title      string  `json:"title"`
+	Path       string  `json:"path"`
+	Tags       []int64 `json:"tags"`
+	HasFile    bool    `json:"hasFile"`
+	SizeOnDisk int64   `json:"sizeOnDisk"`
+	MovieFile  *struct {
+		ID           int64  `json:"id"`
+		Path         string `json:"path"`
+		RelativePath string `json:"relativePath"`
+		Size         int64  `json:"size"`
+	} `json:"movieFile,omitempty"`
+}
+
+// Library returns the full library as normalized LibraryItems. For Radarr,
+// movies without a file (hasFile=false) are skipped — there's nothing to
+// re-encode. The full library is fetched in one call; both *arr APIs return
+// the entire list with no pagination.
+func (c *Client) Library(ctx context.Context) ([]LibraryItem, error) {
+	switch c.kind {
+	case KindSonarr:
+		var series []sonarrSeries
+		if err := c.getJSON(ctx, "/api/v3/series", &series); err != nil {
+			return nil, fmt.Errorf("sonarr series: %w", err)
+		}
+		out := make([]LibraryItem, 0, len(series))
+		for _, s := range series {
+			if s.Statistics.EpisodeFileCount == 0 {
+				continue
+			}
+			out = append(out, LibraryItem{
+				ID:        s.ID,
+				Title:     s.Title,
+				Path:      s.Path,
+				TagIDs:    s.Tags,
+				FileCount: s.Statistics.EpisodeFileCount,
+				TotalSize: s.Statistics.SizeOnDisk,
+			})
+		}
+		return out, nil
+	case KindRadarr:
+		var movies []radarrMovie
+		if err := c.getJSON(ctx, "/api/v3/movie", &movies); err != nil {
+			return nil, fmt.Errorf("radarr movies: %w", err)
+		}
+		out := make([]LibraryItem, 0, len(movies))
+		for _, m := range movies {
+			if !m.HasFile || m.MovieFile == nil {
+				continue
+			}
+			size := m.SizeOnDisk
+			if size == 0 {
+				size = m.MovieFile.Size
+			}
+			out = append(out, LibraryItem{
+				ID:        m.ID,
+				Title:     m.Title,
+				Path:      m.Path,
+				TagIDs:    m.Tags,
+				FileCount: 1,
+				TotalSize: size,
+			})
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("unknown arr kind %q", c.kind)
+	}
+}
+
+// Files returns the playable files for a single parent (series or movie).
+// For Radarr there's at most one file per movie; for Sonarr there may be many.
+func (c *Client) Files(ctx context.Context, parentID int64) ([]LibraryFile, error) {
+	switch c.kind {
+	case KindSonarr:
+		var efs []sonarrEpisodeFile
+		path := fmt.Sprintf("/api/v3/episodefile?seriesId=%d", parentID)
+		if err := c.getJSON(ctx, path, &efs); err != nil {
+			return nil, fmt.Errorf("sonarr episodefile: %w", err)
+		}
+		out := make([]LibraryFile, 0, len(efs))
+		for _, ef := range efs {
+			if ef.Path == "" {
+				continue
+			}
+			out = append(out, LibraryFile{
+				ID:           ef.ID,
+				ParentID:     ef.SeriesID,
+				Path:         ef.Path,
+				RelativePath: ef.RelativePath,
+				Size:         ef.Size,
+			})
+		}
+		return out, nil
+	case KindRadarr:
+		// Radarr exposes the moviefile inline on the MovieResource; fetch the
+		// single movie and read its movieFile.
+		var m radarrMovie
+		if err := c.getJSON(ctx, fmt.Sprintf("/api/v3/movie/%d", parentID), &m); err != nil {
+			return nil, fmt.Errorf("radarr movie %d: %w", parentID, err)
+		}
+		if !m.HasFile || m.MovieFile == nil || m.MovieFile.Path == "" {
+			return nil, nil
+		}
+		return []LibraryFile{{
+			ID:           m.MovieFile.ID,
+			ParentID:     m.ID,
+			Path:         m.MovieFile.Path,
+			RelativePath: m.MovieFile.RelativePath,
+			Size:         m.MovieFile.Size,
+		}}, nil
+	default:
+		return nil, fmt.Errorf("unknown arr kind %q", c.kind)
+	}
+}
+
 // Ping verifies connectivity and API key, distinguishing 401 from other errors.
 func (c *Client) Ping(ctx context.Context) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v3/system/status", nil)

@@ -125,6 +125,32 @@ export interface Job {
   finishedAt?: string;
   originalSize?: number;
   finalSize?: number;
+  source: "webhook" | "backfill";
+}
+
+export interface LibraryItem {
+  itemId: number;
+  title: string;
+  path: string;
+  tagId: number;
+  tagLabel: string;
+  profileId: number;
+  profileName: string;
+  fileCount: number;
+  totalSize: number;
+  activeJobs: number;
+  doneJobs: number;
+}
+
+export interface LibraryResponse {
+  items: LibraryItem[];
+  noMappings: boolean;
+}
+
+export interface LibraryQueueResponse {
+  inserted: number;
+  skipped: number;
+  errors?: string[];
 }
 
 export interface JobListParams {

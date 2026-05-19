@@ -593,9 +593,17 @@ onUnmounted(() => {
       <Column selectionMode="multiple" headerStyle="width: 2.5rem" />
       <Column field="id" header="#" style="width: 4rem" />
       <Column field="title" header="Title" />
-      <Column field="arrKind" header="Source" style="width: 7rem">
+      <Column field="arrKind" header="Source" style="width: 9rem">
         <template #body="{ data }">
-          <Tag :value="data.arrKind" :severity="data.arrKind === 'sonarr' ? 'info' : 'warn'" />
+          <div class="source-cell">
+            <Tag :value="data.arrKind" :severity="data.arrKind === 'sonarr' ? 'info' : 'warn'" />
+            <Tag
+              v-if="data.source === 'backfill'"
+              value="backfill"
+              severity="secondary"
+              title="Manually queued from the Library page"
+            />
+          </div>
         </template>
       </Column>
       <Column header="Profile" style="width: 10rem">
@@ -985,6 +993,12 @@ onUnmounted(() => {
   padding: 0.5rem 0.75rem;
   border-radius: 4px;
   margin-bottom: 0.75rem;
+}
+.source-cell {
+  display: inline-flex;
+  gap: 0.25rem;
+  align-items: center;
+  flex-wrap: wrap;
 }
 .muted {
   color: var(--app-muted);

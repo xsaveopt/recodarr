@@ -220,6 +220,8 @@ func registerAdminRoutes(r chi.Router, st *store.Store, w workerClient, hc *heal
 		r.Delete("/{id}", deleteArrInstance(st))
 		r.Post("/{id}/test", testArrInstance(st))
 		r.Get("/{id}/tags", listArrTags(st))
+		r.Get("/{id}/library", listArrLibrary(st))
+		r.Post("/{id}/library/queue", queueArrLibrary(st))
 		// Reveal endpoint: returns the auto-generated webhook secret so the user
 		// can copy it after saving. The user is the single admin and is already
 		// authenticated, so this is no weaker than the SQLite file itself.
@@ -553,6 +555,269 @@ func listArrTags(st *store.Store) http.HandlerFunc {
 			out = append(out, tagDTO{ID: t.ID, Label: t.Label})
 		}
 		writeJSON(w, http.StatusOK, out)
+	}
+}
+
+// --- library backfill ---
+
+type libraryItemDTO struct {
+	ItemID      int64  `json:"itemId"` // seriesId / movieId
+	Title       string `json:"title"`
+	Path        string `json:"path"`
+	TagID       int64  `json:"tagId"` // first matching tag (ties resolved by mapping order)
+	TagLabel    string `json:"tagLabel"`
+	ProfileID   int64  `json:"profileId"`
+	ProfileName string `json:"profileName"`
+	FileCount   int    `json:"fileCount"`
+	TotalSize   int64  `json:"totalSize"`
+	ActiveJobs  int    `json:"activeJobs"`
+	DoneJobs    int    `json:"doneJobs"`
+}
+
+type libraryResponseDTO struct {
+	Items      []libraryItemDTO `json:"items"`
+	NoMappings bool             `json:"noMappings"` // true when this instance has no tag→profile mappings configured
+}
+
+func listArrLibrary(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+		if err != nil {
+			http.Error(w, "bad id", http.StatusBadRequest)
+			return
+		}
+		inst, err := st.GetArrInstance(r.Context(), id)
+		if err != nil {
+			http.Error(w, "instance not found", http.StatusNotFound)
+			return
+		}
+		if inst.Kind != "sonarr" && inst.Kind != "radarr" {
+			http.Error(w, "unsupported instance kind", http.StatusBadRequest)
+			return
+		}
+
+		mappings, err := st.ListTagMappingsByKind(r.Context(), inst.Kind)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if len(mappings) == 0 {
+			writeJSON(w, http.StatusOK, libraryResponseDTO{Items: []libraryItemDTO{}, NoMappings: true})
+			return
+		}
+
+		// Build tagID → first matching mapping. ListTagMappingsByKind returns
+		// rows in id order, so a tag carried by multiple mappings deterministically
+		// resolves to the oldest one — matches the webhook precedence.
+		mapByTagID := make(map[int64]store.TagMappingRow, len(mappings))
+		for _, mp := range mappings {
+			if _, exists := mapByTagID[mp.TagID]; !exists {
+				mapByTagID[mp.TagID] = mp
+			}
+		}
+
+		profiles, err := st.ListProfiles(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		profileNames := make(map[int64]string, len(profiles))
+		for _, p := range profiles {
+			profileNames[p.ID] = p.Name
+		}
+
+		client := arr.New(arr.Kind(inst.Kind), inst.URL, inst.APIKey)
+		items, err := client.Library(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		// Tag labels: the REST API returns tag IDs, but the SPA renders the label.
+		tags, err := client.Tags(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		tagLabels := make(map[int64]string, len(tags))
+		for _, t := range tags {
+			tagLabels[t.ID] = t.Label
+		}
+
+		type pending struct {
+			item     arr.LibraryItem
+			mapping  store.TagMappingRow
+			tagLabel string
+		}
+		filtered := make([]pending, 0, len(items))
+		parentIDs := make([]int64, 0, len(items))
+		for _, it := range items {
+			for _, tid := range it.TagIDs {
+				if mp, ok := mapByTagID[tid]; ok {
+					filtered = append(filtered, pending{item: it, mapping: mp, tagLabel: tagLabels[tid]})
+					parentIDs = append(parentIDs, it.ID)
+					break
+				}
+			}
+		}
+
+		summaries, err := st.JobSummaryByParent(r.Context(), inst.Kind, inst.ID, parentIDs)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		out := make([]libraryItemDTO, 0, len(filtered))
+		for _, f := range filtered {
+			s := summaries[f.item.ID]
+			out = append(out, libraryItemDTO{
+				ItemID:      f.item.ID,
+				Title:       f.item.Title,
+				Path:        f.item.Path,
+				TagID:       f.mapping.TagID,
+				TagLabel:    f.tagLabel,
+				ProfileID:   f.mapping.ProfileID,
+				ProfileName: profileNames[f.mapping.ProfileID],
+				FileCount:   f.item.FileCount,
+				TotalSize:   f.item.TotalSize,
+				ActiveJobs:  s.Active,
+				DoneJobs:    s.Done,
+			})
+		}
+		writeJSON(w, http.StatusOK, libraryResponseDTO{Items: out})
+	}
+}
+
+type queueLibraryRequest struct {
+	ItemIDs []int64 `json:"itemIds"`
+}
+
+type queueLibraryResponse struct {
+	Inserted int      `json:"inserted"`
+	Skipped  int      `json:"skipped"` // duplicate or unprocessable files
+	Errors   []string `json:"errors,omitempty"`
+}
+
+func queueArrLibrary(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+		if err != nil {
+			http.Error(w, "bad id", http.StatusBadRequest)
+			return
+		}
+		inst, err := st.GetArrInstance(r.Context(), id)
+		if err != nil {
+			http.Error(w, "instance not found", http.StatusNotFound)
+			return
+		}
+		if inst.Kind != "sonarr" && inst.Kind != "radarr" {
+			http.Error(w, "unsupported instance kind", http.StatusBadRequest)
+			return
+		}
+		var req queueLibraryRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad json", http.StatusBadRequest)
+			return
+		}
+		if len(req.ItemIDs) == 0 {
+			writeJSON(w, http.StatusOK, queueLibraryResponse{})
+			return
+		}
+
+		// Re-derive the eligible set server-side: clients can only queue what
+		// the catalogue currently exposes. Defends against stale UI state
+		// trying to queue items whose tag was removed.
+		mappings, err := st.ListTagMappingsByKind(r.Context(), inst.Kind)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if len(mappings) == 0 {
+			http.Error(w, "no tag mappings configured for this instance kind", http.StatusBadRequest)
+			return
+		}
+		mapByTagID := make(map[int64]store.TagMappingRow, len(mappings))
+		for _, mp := range mappings {
+			if _, exists := mapByTagID[mp.TagID]; !exists {
+				mapByTagID[mp.TagID] = mp
+			}
+		}
+
+		client := arr.New(arr.Kind(inst.Kind), inst.URL, inst.APIKey)
+		items, err := client.Library(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		type eligibleItem struct {
+			title    string
+			mapping  store.TagMappingRow
+			tagLabel string
+		}
+		eligible := make(map[int64]eligibleItem, len(items))
+		for _, it := range items {
+			for _, tid := range it.TagIDs {
+				if mp, ok := mapByTagID[tid]; ok {
+					eligible[it.ID] = eligibleItem{title: it.Title, mapping: mp, tagLabel: mp.TagLabel}
+					break
+				}
+			}
+		}
+
+		requested := make(map[int64]struct{}, len(req.ItemIDs))
+		for _, pid := range req.ItemIDs {
+			requested[pid] = struct{}{}
+		}
+
+		resp := queueLibraryResponse{}
+		for pid := range requested {
+			meta, ok := eligible[pid]
+			if !ok {
+				resp.Skipped++
+				resp.Errors = append(resp.Errors, fmt.Sprintf("item %d: not eligible (untagged, missing, or mapping removed)", pid))
+				continue
+			}
+			files, err := client.Files(r.Context(), pid)
+			if err != nil {
+				resp.Errors = append(resp.Errors, fmt.Sprintf("item %d: list files: %v", pid, err))
+				continue
+			}
+			tagsJSON, _ := json.Marshal([]string{meta.tagLabel})
+			for _, f := range files {
+				clean, err := sanitizeMediaPath(f.Path)
+				if err != nil {
+					resp.Skipped++
+					resp.Errors = append(resp.Errors, fmt.Sprintf("file %s: %v", f.Path, err))
+					continue
+				}
+				jr := store.JobRow{
+					ArrKind:       inst.Kind,
+					ArrInstanceID: inst.ID,
+					ArrItemID:     f.ID,
+					ArrParentID:   pid,
+					Title:         meta.title,
+					FilePath:      clean,
+					FileSize:      f.Size,
+					ProfileID:     sql.NullInt64{Int64: meta.mapping.ProfileID, Valid: true},
+					Status:        string(job.StatusReady),
+					Tags:          string(tagsJSON),
+					Source:        "backfill",
+				}
+				newID, err := enqueueIfNew(r.Context(), st, jr)
+				if err != nil {
+					resp.Errors = append(resp.Errors, fmt.Sprintf("file %s: insert: %v", f.Path, err))
+					continue
+				}
+				if newID == 0 {
+					resp.Skipped++
+					continue
+				}
+				resp.Inserted++
+			}
+		}
+		slog.Info("library backfill",
+			"kind", inst.Kind, "instance", inst.ID,
+			"requested", len(requested), "inserted", resp.Inserted, "skipped", resp.Skipped)
+		writeJSON(w, http.StatusOK, resp)
 	}
 }
 
@@ -1064,6 +1329,7 @@ type jobDTO struct {
 	FinishedAt    *string `json:"finishedAt,omitempty"`
 	OriginalSize  *int64  `json:"originalSize,omitempty"`
 	FinalSize     *int64  `json:"finalSize,omitempty"`
+	Source        string  `json:"source"`
 }
 
 func rowToJobDTO(row store.JobRow) jobDTO {
@@ -1075,6 +1341,10 @@ func rowToJobDTO(row store.JobRow) jobDTO {
 		DownloadID: row.DownloadID, Status: row.Status, Error: row.Error,
 		EncodeLog: row.EncodeLog, RefreshError: row.RefreshError, Attempts: row.Attempts,
 		CreatedAt: row.CreatedAt.Format(ts), UpdatedAt: row.UpdatedAt.Format(ts),
+		Source: row.Source,
+	}
+	if d.Source == "" {
+		d.Source = "webhook"
 	}
 	if row.ProfileID.Valid {
 		v := row.ProfileID.Int64

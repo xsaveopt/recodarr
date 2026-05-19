@@ -102,6 +102,9 @@ type JobRow struct {
 	// profile against the current tag→profile mappings, so mapping edits
 	// take effect on queued jobs.
 	Tags string
+	// Source is how the job was created. 'webhook' = pushed by Sonarr/Radarr;
+	// 'backfill' = enqueued manually from the Library page.
+	Source string
 }
 
 type JobStatsRow struct {
@@ -114,11 +117,11 @@ type JobStatsRow struct {
 	TotalSavedBytes int64
 }
 
-const jobCols = `id,arr_kind,arr_instance_id,arr_item_id,arr_parent_id,title,file_path,file_size,download_id,profile_id,status,error,encode_log,refresh_error,attempts,created_at,updated_at,started_at,finished_at,original_size,final_size,tags`
+const jobCols = `id,arr_kind,arr_instance_id,arr_item_id,arr_parent_id,title,file_path,file_size,download_id,profile_id,status,error,encode_log,refresh_error,attempts,created_at,updated_at,started_at,finished_at,original_size,final_size,tags,source`
 
 func scanJob(scan func(...any) error) (JobRow, error) {
 	var r JobRow
-	err := scan(&r.ID, &r.ArrKind, &r.ArrInstanceID, &r.ArrItemID, &r.ArrParentID, &r.Title, &r.FilePath, &r.FileSize, &r.DownloadID, &r.ProfileID, &r.Status, &r.Error, &r.EncodeLog, &r.RefreshError, &r.Attempts, &r.CreatedAt, &r.UpdatedAt, &r.StartedAt, &r.FinishedAt, &r.OriginalSize, &r.FinalSize, &r.Tags)
+	err := scan(&r.ID, &r.ArrKind, &r.ArrInstanceID, &r.ArrItemID, &r.ArrParentID, &r.Title, &r.FilePath, &r.FileSize, &r.DownloadID, &r.ProfileID, &r.Status, &r.Error, &r.EncodeLog, &r.RefreshError, &r.Attempts, &r.CreatedAt, &r.UpdatedAt, &r.StartedAt, &r.FinishedAt, &r.OriginalSize, &r.FinalSize, &r.Tags, &r.Source)
 	return r, err
 }
 
@@ -555,6 +558,62 @@ func (s *Store) HasActiveJob(ctx context.Context, arrKind string, arrInstanceID,
 	return n > 0, err
 }
 
+// ParentJobSummary aggregates job counts for a single arr_parent_id (seriesId / movieId).
+type ParentJobSummary struct {
+	Active int // status not in ('done','failed','skipped')
+	Done   int // status = 'done'
+}
+
+// JobSummaryByParent returns a per-parent job summary for the given parent IDs.
+// Used by the Library page to label parents that already have queued or completed work.
+// Parents with no jobs are absent from the result map (zero-value lookups work fine).
+func (s *Store) JobSummaryByParent(ctx context.Context, arrKind string, arrInstanceID int64, parentIDs []int64) (map[int64]ParentJobSummary, error) {
+	out := make(map[int64]ParentJobSummary, len(parentIDs))
+	if len(parentIDs) == 0 {
+		return out, nil
+	}
+	const chunk = 500 // well under SQLITE_MAX_VARIABLE_NUMBER even with 3 bound params
+	for start := 0; start < len(parentIDs); start += chunk {
+		end := start + chunk
+		if end > len(parentIDs) {
+			end = len(parentIDs)
+		}
+		batch := parentIDs[start:end]
+		args := make([]any, 0, 2+len(batch))
+		args = append(args, arrKind, arrInstanceID)
+		placeholders := strings.Repeat("?,", len(batch))
+		placeholders = placeholders[:len(placeholders)-1]
+		for _, id := range batch {
+			args = append(args, id)
+		}
+		query := `SELECT arr_parent_id,
+			SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done_count,
+			SUM(CASE WHEN status NOT IN ('done','failed','skipped') THEN 1 ELSE 0 END) AS active_count
+		FROM jobs
+		WHERE arr_kind = ? AND arr_instance_id = ? AND arr_parent_id IN (` + placeholders + `)
+		GROUP BY arr_parent_id`
+		rows, err := s.DB.QueryContext(ctx, query, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var pid int64
+			var done, active int
+			if err := rows.Scan(&pid, &done, &active); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			out[pid] = ParentJobSummary{Active: active, Done: done}
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		_ = rows.Close()
+	}
+	return out, nil
+}
+
 func (s *Store) JobsByStatus(ctx context.Context, status string, limit int) ([]JobRow, error) {
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT `+jobCols+` FROM jobs WHERE status = ? ORDER BY id ASC LIMIT ?`, status, limit)
@@ -794,9 +853,13 @@ func (s *Store) InsertJob(ctx context.Context, r JobRow) (int64, error) {
 	if tags == "" {
 		tags = "[]"
 	}
+	source := r.Source
+	if source == "" {
+		source = "webhook"
+	}
 	res, err := s.DB.ExecContext(ctx,
-		`INSERT INTO jobs (arr_kind,arr_instance_id,arr_item_id,arr_parent_id,title,file_path,file_size,download_id,profile_id,status,tags) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-		r.ArrKind, r.ArrInstanceID, r.ArrItemID, r.ArrParentID, r.Title, r.FilePath, r.FileSize, r.DownloadID, r.ProfileID, r.Status, tags)
+		`INSERT INTO jobs (arr_kind,arr_instance_id,arr_item_id,arr_parent_id,title,file_path,file_size,download_id,profile_id,status,tags,source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+		r.ArrKind, r.ArrInstanceID, r.ArrItemID, r.ArrParentID, r.Title, r.FilePath, r.FileSize, r.DownloadID, r.ProfileID, r.Status, tags, source)
 	if err != nil {
 		return 0, err
 	}

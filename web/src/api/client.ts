@@ -10,6 +10,8 @@ import type {
   JobListParams,
   JobsPage,
   JobStats,
+  LibraryQueueResponse,
+  LibraryResponse,
   Profile,
   QbitInstance,
   TagMapping,
@@ -72,6 +74,9 @@ export const api = {
       request<{ ok: boolean; error?: string }>("POST", `/arr-instances/${id}/test`),
     revealWebhookSecret: (id: number) =>
       request<{ username: string; password: string }>("GET", `/arr-instances/${id}/webhook-secret`),
+    library: (id: number) => request<LibraryResponse>("GET", `/arr-instances/${id}/library`),
+    queueLibrary: (id: number, itemIds: number[]) =>
+      request<LibraryQueueResponse>("POST", `/arr-instances/${id}/library/queue`, { itemIds }),
   },
   tagMappings: {
     list: () => request<TagMapping[]>("GET", "/tag-mappings"),
