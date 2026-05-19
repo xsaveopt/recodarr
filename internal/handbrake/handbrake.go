@@ -206,24 +206,67 @@ func Run(ctx context.Context, input string, s Settings, sink *LineSink, onProgre
 	go pump(stderrPipe, stderrMirror, false, errDone)
 	<-outDone
 	<-errDone
-	if err := cmd.Wait(); err != nil {
+	waitErr := cmd.Wait()
+	logText := buf.String()
+	// HandBrakeCLI exits 0 even when the encode fails (encoder init failure,
+	// hwaccel session error, missing codec support, etc.) — the actual outcome
+	// is buried in stdout as `libhb: work result = N` and/or `Encode failed
+	// (error N)`. Treat a non-zero work result as a hard failure regardless of
+	// the process exit code; otherwise we would cheerfully rename a 0-byte
+	// temp file over the source. Also treat a missing work-result line on a
+	// clean exit as failure: a successful encode always emits one.
+	if waitErr == nil {
+		rc, ok := parseWorkResult(logText)
+		if !ok {
+			_ = os.Remove(tmp)
+			return RunResult{Log: logText}, fmt.Errorf("HandBrakeCLI: no work result reported (encoder likely failed to initialize)")
+		}
+		if rc != 0 {
+			_ = os.Remove(tmp)
+			return RunResult{Log: logText}, fmt.Errorf("HandBrakeCLI: work result = %d", rc)
+		}
+	} else {
 		_ = os.Remove(tmp)
-		return RunResult{Log: buf.String()}, fmt.Errorf("HandBrakeCLI: %w", err)
+		return RunResult{Log: logText}, fmt.Errorf("HandBrakeCLI: %w", waitErr)
 	}
 
 	stat, err := os.Stat(tmp)
 	if err != nil {
-		return RunResult{Log: buf.String()}, fmt.Errorf("stat tmp: %w", err)
+		return RunResult{Log: logText}, fmt.Errorf("stat tmp: %w", err)
 	}
 	if s.NoCommit {
 		// Leave the temp file in place; caller decides what to do with it.
-		return RunResult{FinalSize: stat.Size(), TempPath: tmp, Log: buf.String()}, nil
+		return RunResult{FinalSize: stat.Size(), TempPath: tmp, Log: logText}, nil
 	}
 	if err := os.Rename(tmp, input); err != nil {
 		_ = os.Remove(tmp)
-		return RunResult{Log: buf.String()}, fmt.Errorf("rename: %w", err)
+		return RunResult{Log: logText}, fmt.Errorf("rename: %w", err)
 	}
-	return RunResult{FinalSize: stat.Size(), Log: buf.String()}, nil
+	return RunResult{FinalSize: stat.Size(), Log: logText}, nil
+}
+
+// parseWorkResult finds HandBrake's `libhb: work result = N` line in the captured
+// output. Returns the integer N and true if found. Reads from the end backwards
+// because the line is always near the tail of the log and the buffer may be large.
+func parseWorkResult(log string) (int, bool) {
+	const marker = "work result = "
+	idx := strings.LastIndex(log, marker)
+	if idx < 0 {
+		return 0, false
+	}
+	rest := log[idx+len(marker):]
+	end := 0
+	for end < len(rest) && (rest[end] == '-' || (rest[end] >= '0' && rest[end] <= '9')) {
+		end++
+	}
+	if end == 0 {
+		return 0, false
+	}
+	n, err := strconv.Atoi(rest[:end])
+	if err != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 // Commit atomically renames a temp file produced with Settings.NoCommit over the
