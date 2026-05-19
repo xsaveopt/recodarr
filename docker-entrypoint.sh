@@ -1,71 +1,38 @@
 #!/bin/sh
-# Auto-configure LIBVA_DRIVER_NAME so VAAPI/QSV "just work" on whichever GPU
-# the user passed through. FFmpeg's VAAPI hwdevice creation often can't
-# enumerate drivers in a containerised, non-X environment; setting the driver
-# name explicitly skips that enumeration and points libva at the right .so.
+# Two GPU-related startup fixups, both no-ops on hosts without a render node:
 #
-# Detection reads /sys/class/drm/renderD*/device/vendor (PCI vendor ID), so it
-# works without root and without invoking lspci. NVIDIA never touches libva so
-# it's harmless when no DRM node is mapped — we just don't set anything.
+# 1. Auto-export LIBVA_DRIVER_NAME based on the PCI vendor of /dev/dri/renderD128
+#    so libva initialises cleanly in a containerised, non-X environment without
+#    relying on driver auto-enumeration. User-set env wins.
 #
-# Anything the user sets in compose/env wins: the explicit check below only
-# fires when LIBVA_DRIVER_NAME is unset.
+# 2. Work around a HandBrake-on-Linux bug (libhb/hwaccel.c) where the FFmpeg QSV
+#    child_device hint is written as a bare integer ("0"). On Windows that's a
+#    d3d11va adapter index; on Linux the child is VAAPI which treats it as a
+#    path, calls open("0"), fails. We `cd` into a dir containing 0→renderD128,
+#    1→renderD129, … so the relative open() resolves. Remove when upstream
+#    HandBrake passes a real /dev/dri path.
 
 set -e
 
-log() { echo "[entrypoint] $*" >&2; }
-
-if [ -n "${LIBVA_DRIVER_NAME:-}" ]; then
-    log "LIBVA_DRIVER_NAME already set to '$LIBVA_DRIVER_NAME' (from env); leaving as-is"
-elif [ ! -e /dev/dri/renderD128 ]; then
-    log "no /dev/dri/renderD128 — skipping GPU vendor detection (NVENC or no GPU)"
-else
-    detected=""
+if [ -z "${LIBVA_DRIVER_NAME:-}" ] && [ -e /dev/dri/renderD128 ]; then
     for dev in /sys/class/drm/renderD*/device/vendor; do
         [ -r "$dev" ] || continue
-        vendor=$(cat "$dev" 2>/dev/null || true)
-        case "$vendor" in
-            0x8086) detected=iHD ;;      # Intel
-            0x1002) detected=radeonsi ;; # AMD
-            *)      log "unknown GPU vendor '$vendor' at $dev — leaving LIBVA_DRIVER_NAME unset" ;;
+        case "$(cat "$dev" 2>/dev/null)" in
+            0x8086) export LIBVA_DRIVER_NAME=iHD ;;
+            0x1002) export LIBVA_DRIVER_NAME=radeonsi ;;
         esac
-        [ -n "$detected" ] && break
+        break
     done
-    if [ -n "$detected" ]; then
-        export LIBVA_DRIVER_NAME="$detected"
-        log "detected GPU vendor → LIBVA_DRIVER_NAME=$detected"
-    else
-        log "no readable /sys/class/drm/renderD*/device/vendor entries — leaving LIBVA_DRIVER_NAME unset"
-    fi
 fi
 
-# HandBrake QSV-on-Linux workaround: libhb/hwaccel.c passes the FFmpeg QSV
-# child device hint as a bare integer ("0", "1", ...). That's correct for the
-# Windows d3d11va child but on Linux the child is VAAPI, which interprets the
-# string as a filesystem path and calls open("0", O_RDWR). The open fails and
-# the encode dies with "No VA display found for device 0".
-#
-# We work around it by setting the worker's CWD to a directory where "0",
-# "1", ... are symlinks to the matching /dev/dri/renderD12N nodes. FFmpeg's
-# open() then resolves to the right render node, libva initializes, QSV runs.
-#
-# Track HandBrake upstream — when their Linux path passes a proper /dev/dri
-# path, this can go away.
 QSV_CWD=/tmp/recodarr-qsv-cwd
 if mkdir -p "$QSV_CWD" 2>/dev/null; then
-    linked=""
     for render in /dev/dri/renderD*; do
         [ -e "$render" ] || continue
-        num=$(basename "$render" | sed 's/renderD//')
-        idx=$((num - 128))
-        if ln -sfn "$render" "$QSV_CWD/$idx" 2>/dev/null; then
-            linked="$linked $idx→$(basename "$render")"
-        fi
+        idx=$(($(basename "$render" | sed 's/renderD//') - 128))
+        ln -sfn "$render" "$QSV_CWD/$idx" 2>/dev/null || true
     done
-    if [ -n "$linked" ]; then
-        log "QSV child_device workaround symlinks:$linked (cwd=$QSV_CWD)"
-        cd "$QSV_CWD" || log "could not chdir to $QSV_CWD — workaround inactive"
-    fi
+    cd "$QSV_CWD" 2>/dev/null || true
 fi
 
 exec /usr/local/bin/recodarr "$@"

@@ -208,26 +208,21 @@ func Run(ctx context.Context, input string, s Settings, sink *LineSink, onProgre
 	<-errDone
 	waitErr := cmd.Wait()
 	logText := buf.String()
-	// HandBrakeCLI exits 0 even when the encode fails (encoder init failure,
-	// hwaccel session error, missing codec support, etc.) — the actual outcome
-	// is buried in stdout as `libhb: work result = N` and/or `Encode failed
-	// (error N)`. Treat a non-zero work result as a hard failure regardless of
-	// the process exit code; otherwise we would cheerfully rename a 0-byte
-	// temp file over the source. Also treat a missing work-result line on a
-	// clean exit as failure: a successful encode always emits one.
-	if waitErr == nil {
-		rc, ok := parseWorkResult(logText)
-		if !ok {
-			_ = os.Remove(tmp)
-			return RunResult{Log: logText}, fmt.Errorf("HandBrakeCLI: no work result reported (encoder likely failed to initialize)")
-		}
-		if rc != 0 {
-			_ = os.Remove(tmp)
-			return RunResult{Log: logText}, fmt.Errorf("HandBrakeCLI: work result = %d", rc)
-		}
-	} else {
+	// HandBrakeCLI exits 0 even on failed encodes — the real outcome is in
+	// `libhb: work result = N` on stdout. Without checking we'd rename a
+	// 0-byte temp over the source.
+	if waitErr != nil {
 		_ = os.Remove(tmp)
 		return RunResult{Log: logText}, fmt.Errorf("HandBrakeCLI: %w", waitErr)
+	}
+	rc, ok := parseWorkResult(logText)
+	if !ok {
+		_ = os.Remove(tmp)
+		return RunResult{Log: logText}, fmt.Errorf("HandBrakeCLI: no work result reported (encoder likely failed to initialize)")
+	}
+	if rc != 0 {
+		_ = os.Remove(tmp)
+		return RunResult{Log: logText}, fmt.Errorf("HandBrakeCLI: work result = %d", rc)
 	}
 
 	stat, err := os.Stat(tmp)
@@ -245,9 +240,6 @@ func Run(ctx context.Context, input string, s Settings, sink *LineSink, onProgre
 	return RunResult{FinalSize: stat.Size(), Log: logText}, nil
 }
 
-// parseWorkResult finds HandBrake's `libhb: work result = N` line in the captured
-// output. Returns the integer N and true if found. Reads from the end backwards
-// because the line is always near the tail of the log and the buffer may be large.
 func parseWorkResult(log string) (int, bool) {
 	const marker = "work result = "
 	idx := strings.LastIndex(log, marker)

@@ -14,12 +14,15 @@ services:
       # Mount your *arr library roots so Recodarr can re-encode in place.
       # Paths inside the container must match what Sonarr/Radarr send in webhook payloads.
       - /srv/media:/srv/media
-    # Intel iGPU (QSV/VAAPI) device passthrough — uncomment for hwaccel.
+    # Intel iGPU / Arc (QSV/VAAPI) device passthrough — uncomment for hwaccel.
+    # Only the render node is needed; the entrypoint handles HandBrake's
+    # Linux-QSV-on-VAAPI device-naming quirk via cwd-relative symlinks.
     # devices:
-    #   - /dev/dri:/dev/dri
+    #   - /dev/dri/renderD128:/dev/dri/renderD128
     # group_add:
     #   - "104"  # render — set to host's `getent group render | cut -d: -f3`
-    #   - "44"   # video
+    #
+    # AMD VCE — same shape; pass renderD128 + the host's render group.
     #
     # NVIDIA NVENC — requires nvidia-container-toolkit on the host.
     # deploy:
