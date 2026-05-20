@@ -301,6 +301,19 @@ function startEdit(row: Profile) {
   editing.value = fillDefaults({ ...row });
 }
 
+function startDuplicate(row: Profile) {
+  validationError.value = null;
+  const copy: Partial<Profile> = { ...row };
+  delete copy.id;
+  const taken = new Set(items.value.map((p) => p.name));
+  const base = `${row.name} (copy)`;
+  let candidate = base;
+  let n = 2;
+  while (taken.has(candidate)) candidate = `${base} ${n++}`;
+  copy.name = candidate;
+  editing.value = fillDefaults(copy);
+}
+
 async function save() {
   if (!editing.value) return;
   validationError.value = null;
@@ -394,6 +407,7 @@ onMounted(load);
       <Column header="" style="width: 8rem">
         <template #body="{ data }">
           <Button text size="small" icon="pi pi-pencil" @click="startEdit(data)" />
+          <Button text size="small" icon="pi pi-copy" title="Duplicate" @click="startDuplicate(data)" />
           <Button text size="small" severity="danger" icon="pi pi-trash" @click="remove(data)" />
         </template>
       </Column>
