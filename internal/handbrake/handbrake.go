@@ -33,6 +33,9 @@ type Caps struct {
 var (
 	capsOnce sync.Once
 	capsVal  Caps
+
+	versionOnce sync.Once
+	versionVal  string
 )
 
 // QueryCaps discovers HandBrakeCLI capabilities once and caches the result.
@@ -41,18 +44,25 @@ func QueryCaps() Caps {
 	return capsVal
 }
 
-// VersionString returns the output of HandBrakeCLI --version, or an error message if not found.
+// VersionString returns the output of HandBrakeCLI --version, or an error message
+// if not found. Cached after the first call — the binary on PATH doesn't change
+// at runtime, and this is called from per-scrape metric collection and per-tick
+// health probes.
 func VersionString() string {
-	// stdout only — stderr carries libhb init noise (nvenc/qsv probes, thread starts).
-	out, err := exec.Command("HandBrakeCLI", "--version").Output()
-	v := strings.TrimSpace(string(out))
-	if err != nil && v == "" {
-		return "(HandBrakeCLI not found)"
-	}
-	if i := strings.IndexByte(v, '\n'); i >= 0 {
-		v = strings.TrimSpace(v[:i])
-	}
-	return v
+	versionOnce.Do(func() {
+		// stdout only — stderr carries libhb init noise (nvenc/qsv probes, thread starts).
+		out, err := exec.Command("HandBrakeCLI", "--version").Output()
+		v := strings.TrimSpace(string(out))
+		if err != nil && v == "" {
+			versionVal = "(HandBrakeCLI not found)"
+			return
+		}
+		if i := strings.IndexByte(v, '\n'); i >= 0 {
+			v = strings.TrimSpace(v[:i])
+		}
+		versionVal = v
+	})
+	return versionVal
 }
 
 // Settings describes an encode job in terms of HandBrakeCLI flags.

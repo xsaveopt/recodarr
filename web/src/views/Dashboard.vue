@@ -5,12 +5,13 @@ import { RouterLink } from "vue-router";
 import { api } from "@/api/client";
 import { useEncodeProgress } from "@/composables/useEncodeProgress";
 import { useNotify } from "@/composables/useNotify";
-import type { HealthSnapshot, Job, JobStats, JobStatus, WorkerStatus } from "@/types/api";
+import { useWorkerStatus } from "@/composables/useWorkerStatus";
+import type { HealthSnapshot, Job, JobStats, JobStatus } from "@/types/api";
 
 const notify = useNotify();
 const stats = ref<JobStats | null>(null);
 const recentJobs = ref<Job[]>([]);
-const workerStatus = ref<WorkerStatus | null>(null);
+const { status: workerStatus, refresh: refreshWorker } = useWorkerStatus();
 const health = ref<HealthSnapshot | null>(null);
 let timer: number | null = null;
 
@@ -67,7 +68,7 @@ async function togglePause() {
     } else {
       notify.success("Encoding resumed");
     }
-    await load();
+    await Promise.all([refreshWorker(), load()]);
   }
 }
 
@@ -93,11 +94,8 @@ async function load(silent = false) {
     loadOne(() => api.jobs.list({ limit: 12 }), "Couldn't load recent jobs", silent).then((r) => {
       if (r) recentJobs.value = r.jobs;
     }),
-    loadOne(() => api.worker.status(), "Couldn't load worker status", silent).then((r) => {
-      if (r) {
-        workerStatus.value = r;
-        prune(r.encodingJobIds);
-      }
+    refreshWorker().then(() => {
+      if (workerStatus.value) prune(workerStatus.value.encodingJobIds);
     }),
     loadOne(() => api.status.get(), "Couldn't load health", silent).then((r) => {
       if (r) health.value = r;

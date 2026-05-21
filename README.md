@@ -52,7 +52,7 @@ services:
 docker compose up -d
 ```
 
-See the GPU acceleration section below to add hardware encode/decode.
+The image is self-contained — HandBrakeCLI, ffprobe, VAAPI/QSV userspace and Mesa VA drivers all ship inside it. CPU-only deployments need no host packages at all. For hardware encode/decode the host has to provide the kernel side (GPU driver, firmware, and for NVIDIA the Container Toolkit); see the GPU acceleration section below.
 
 ## Wiring it up
 

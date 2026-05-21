@@ -4,13 +4,41 @@ import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
 import Toast from "primevue/toast";
 import ConfirmDialog from "primevue/confirmdialog";
 import { api } from "@/api/client";
+import { useNotify } from "@/composables/useNotify";
 import { useTheme } from "@/composables/useTheme";
+import { useWorkerStatus } from "@/composables/useWorkerStatus";
 
 const route = useRoute();
 const router = useRouter();
 const username = ref("");
 const userMenuOpen = ref(false);
 const { theme, cycle } = useTheme();
+const notify = useNotify();
+const { status: workerStatus, refresh: refreshWorker } = useWorkerStatus();
+const pauseBusy = ref(false);
+
+async function togglePause() {
+  if (!workerStatus.value || pauseBusy.value) return;
+  const next = !workerStatus.value.paused;
+  pauseBusy.value = true;
+  const res = await notify.tryRun(
+    () => api.worker.setPaused(next),
+    next ? "Couldn't pause" : "Couldn't resume",
+  );
+  pauseBusy.value = false;
+  if (res !== undefined) {
+    if (next) {
+      notify.success(
+        res.cancelled > 0
+          ? `Encoding paused — ${res.cancelled} in-flight encode(s) re-queued`
+          : "Encoding paused",
+      );
+    } else {
+      notify.success("Encoding resumed");
+    }
+    await refreshWorker();
+  }
+}
 
 async function refreshUser() {
   if (route.meta.public) {
@@ -82,6 +110,18 @@ const navItems = [
           </nav>
         </div>
         <div class="actions">
+          <button
+            v-if="username && workerStatus"
+            class="pause-btn"
+            :class="{ 'pause-btn-paused': workerStatus.paused }"
+            type="button"
+            :disabled="pauseBusy"
+            :title="workerStatus.paused ? 'Resume encoding' : 'Pause encoding'"
+            @click="togglePause"
+          >
+            <i class="pi" :class="workerStatus.paused ? 'pi-play' : 'pi-pause'"></i>
+            <span class="pause-btn-label">{{ workerStatus.paused ? "Resume" : "Pause" }}</span>
+          </button>
           <button
             class="icon-btn"
             type="button"
@@ -224,6 +264,52 @@ const navItems = [
 }
 .icon-btn .pi {
   font-size: 0.85rem;
+}
+
+.pause-btn {
+  background: transparent;
+  border: 1px solid var(--rc-border);
+  color: var(--rc-fg-2);
+  height: 28px;
+  padding: 0 0.6rem;
+  border-radius: var(--rc-r-sm);
+  font-size: 0.8rem;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+  margin-right: 0.4rem;
+  transition:
+    color 0.08s ease,
+    background 0.08s ease,
+    border-color 0.08s ease;
+}
+.pause-btn:hover:not(:disabled) {
+  color: var(--rc-fg);
+  background: var(--rc-surface-2);
+}
+.pause-btn:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+.pause-btn .pi {
+  font-size: 0.75rem;
+}
+.pause-btn-paused {
+  color: var(--rc-accent);
+  border-color: var(--rc-accent);
+}
+.pause-btn-paused:hover:not(:disabled) {
+  color: var(--rc-accent);
+}
+@media (max-width: 640px) {
+  .pause-btn-label {
+    display: none;
+  }
+  .pause-btn {
+    padding: 0 0.5rem;
+  }
 }
 
 .user-wrap {

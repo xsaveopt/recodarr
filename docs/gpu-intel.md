@@ -10,11 +10,11 @@ If your card is AMD, the same `/dev/dri` passthrough enables `vce_*` encoders vi
 
 ## Prerequisites
 
-You need three things on the **host**:
+The container ships the full VAAPI / QSV userspace (iHD driver, `libvpl2` + `libmfx-gen1.2`, Mesa VA drivers, `vainfo`) — **you do not install any of those on the host**. What the host has to provide is the kernel side, since the container can't inject kernel modules or firmware:
 
 1. **A working Intel GPU**. Confirm `/dev/dri/renderD128` exists. If it doesn't, the iGPU is disabled in BIOS or the kernel didn't load `i915` / `xe`.
-2. **`vainfo` works on the host** and lists the codecs you expect (more on this below). If it doesn't, no container config will help.
-3. **The right kernel + driver combo for your GPU generation** (table below). Older distros sometimes ship kernels too old for newer Intel hardware.
+2. **The right kernel + driver combo for your GPU generation** (table below). Older distros sometimes ship kernels too old for newer Intel hardware.
+3. **GPU firmware available to the kernel** (GuC/HuC blobs). On Debian/Ubuntu install `firmware-misc-nonfree`; most other distros ship it in `linux-firmware`. Required for LP encode on i915 and for `xe` on Arc/Lunar/Battlemage.
 
 ### Kernel / driver matrix
 
@@ -30,27 +30,25 @@ Run `uname -r` to check. If your kernel is older than the minimum for your GPU, 
 
 ### Host packages
 
-On Debian / Ubuntu:
+For Recodarr itself, **none** beyond the firmware mentioned above — the VAAPI/QSV userspace lives inside the container.
+
+If you want to sanity-check the GPU from the host before bringing the container up, install `vainfo` (and the matching driver, since `vainfo` needs one to talk to):
 
 ```bash
-sudo apt install intel-media-va-driver-non-free vainfo
+sudo apt install vainfo intel-media-va-driver-non-free   # Debian / Ubuntu, optional
 ```
 
-For Arc and newer, also:
+These are diagnostic-only; the container has its own copy and ignores whatever you install on the host. The `non-free` variant is the right one — `intel-media-va-driver` (without `non-free`) is missing the encoder bits.
 
-```bash
-sudo apt install intel-opencl-icd          # OpenCL runtime, used for some HW filters
-```
+### Verify on the host (optional)
 
-The `non-free` driver variant is the right one — `intel-media-va-driver` (without `non-free`) is missing the encoder bits.
-
-### Verify on the host
+If you installed `vainfo`:
 
 ```bash
 vainfo --display drm --device /dev/dri/renderD128
 ```
 
-You should see a list of profiles ending with entries like `VAProfileHEVCMain10`, `VAProfileAV1Profile0` and **both** `VAEntrypointEncSlice` (regular encode) and `VAEntrypointEncSliceLP` (low-power encode) for each profile your card supports. If `vainfo` returns "no encoders" or a tiny list, the host driver setup is wrong — fix it before moving on.
+You should see a list of profiles ending with entries like `VAProfileHEVCMain10`, `VAProfileAV1Profile0` and **both** `VAEntrypointEncSlice` (regular encode) and `VAEntrypointEncSliceLP` (low-power encode) for each profile your card supports. If `vainfo` returns "no encoders" or a tiny list, the host kernel/driver setup is wrong — fix it before moving on. If you skipped the host install, jump straight to the in-container verify further down.
 
 ### Find the render group ID
 
@@ -170,7 +168,7 @@ If you're on pre-Kaby Lake hardware, edit the QSV profiles to use `qsv_h264` ins
 Group ID mismatch. Re-run `getent group render` on the host and update `group_add`.
 
 **`vainfo` works in container but Recodarr says "QSV: not detected"**
-HandBrake's QSV plugin needs `intel-opencl-icd` on Arc-class hardware. The Recodarr image ships the runtime libs that work for older silicon out of the box; for Arc and newer, the OpenCL runtime is also included but verify the kernel/driver combo with the matrix above.
+HandBrake's QSV plugin failed to initialize even though VAAPI is fine. The Recodarr image already ships `libvpl2`, `libmfx-gen1.2` and the `iHD` driver, so this is almost always a kernel/firmware gap on the host — verify the kernel matches the matrix above and that `firmware-misc-nonfree` (GuC/HuC) is installed.
 
 **Encode starts but is implausibly slow (CPU usage high, GPU idle)**
 The profile is using a software encoder. Check **Settings → HandBrake Profiles** — the encoder field must start with `qsv_` (or `vce_` for AMD).

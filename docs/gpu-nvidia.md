@@ -8,13 +8,13 @@ GPU encode (NVENC) and decode (NVDEC) for the matching codec family. Concretely:
 
 ## Prerequisites
 
-You need three things on the **host**, not in the container:
+NVENC/NVDEC are different from Intel/AMD: the userspace libraries (`libnvidia-encode`, `libnvcuvid`, …) are version-locked to the kernel driver, so the Container Toolkit bind-mounts them in from the host at runtime rather than the image shipping its own copy. That means the host setup is non-negotiable:
 
 1. **NVIDIA proprietary driver** installed and working. `nvidia-smi` on the host must succeed.
 2. **NVIDIA Container Toolkit** so Docker can hand the GPU to a container.
 3. **Docker configured to use the nvidia runtime** (one command after toolkit install).
 
-Driver minimums for current NVENC features: **Linux 535+** is the safe floor. Earlier drivers may work but won't expose AV1 on Ada cards.
+You do **not** install CUDA, `nvidia-encode`, or HandBrake on the host — those come from the image and the toolkit's mounts. Driver minimums for current NVENC features: **Linux 535+** is the safe floor. Earlier drivers may work but won't expose AV1 on Ada cards.
 
 ### Install the driver
 
