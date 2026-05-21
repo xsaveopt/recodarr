@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import InputNumber from "primevue/inputnumber";
@@ -7,10 +7,11 @@ import ToggleSwitch from "primevue/toggleswitch";
 
 import { api } from "@/api/client";
 import { useNotify } from "@/composables/useNotify";
+import { useWorkerStatus } from "@/composables/useWorkerStatus";
 import type { AppSettings } from "@/types/api";
 
 const notify = useNotify();
-import { computed } from "vue";
+const { status: workerStatus, refresh: refreshWorker } = useWorkerStatus();
 
 const intervalSeconds = ref<number>(30);
 const maxParallel = ref<number>(1);
@@ -20,6 +21,17 @@ const enabled = ref<boolean>(true);
 const suffixEnabled = ref<boolean>(false);
 const outputSuffix = ref<string>("recodarr");
 
+// Keep the local toggle in lockstep with the shared poller so toggling pause
+// from the topbar (or another tab) updates this panel without a manual refresh.
+watch(
+  () => workerStatus.value?.paused,
+  (p) => {
+    if (p === undefined) return;
+    enabled.value = !p;
+  },
+  { immediate: true },
+);
+
 async function load() {
   const s = await notify.tryRun(() => api.settings.get(), "Couldn't load settings");
   if (s) {
@@ -27,7 +39,7 @@ async function load() {
     maxParallel.value = parseInt(s.max_parallel_encodes ?? "1") || 1;
     windowStart.value = s.encoding_window_start ?? "";
     windowEnd.value = s.encoding_window_end ?? "";
-    enabled.value = s.encoding_paused !== "true";
+    if (workerStatus.value == null) enabled.value = s.encoding_paused !== "true";
     suffixEnabled.value = s.output_suffix_enabled === "true";
     outputSuffix.value = (s.output_suffix ?? "").trim() || "recodarr";
   }
@@ -61,6 +73,7 @@ async function toggleEnabled(next: boolean) {
   } else {
     notify.success("Worker enabled");
   }
+  await refreshWorker();
 }
 
 async function save() {

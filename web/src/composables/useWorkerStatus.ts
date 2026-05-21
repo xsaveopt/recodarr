@@ -5,14 +5,19 @@ import type { WorkerStatus } from "@/types/api";
 
 // Singleton worker-status poller. Multiple components subscribe via
 // useWorkerStatus(); polling starts when the first one mounts and stops when
-// the last one unmounts. Anything that mutates worker state (pause/resume,
-// window changes) should call refresh() so subscribers don't wait for the
-// next tick.
+// the last one unmounts. Polling is also paused while the tab is hidden so
+// background tabs don't churn the API.
+//
+// Anything that mutates worker state (pause/resume, window changes) should
+// call refresh() so subscribers don't wait for the next tick.
+
+const POLL_MS = 10000;
 
 const status = ref<WorkerStatus | null>(null);
 let timer: number | null = null;
 let refcount = 0;
 let inFlight: Promise<void> | null = null;
+let visibilityHooked = false;
 
 async function refresh(): Promise<void> {
   if (inFlight) return inFlight;
@@ -28,29 +33,43 @@ async function refresh(): Promise<void> {
   return inFlight;
 }
 
-function start() {
+function startTimer() {
   if (timer != null) return;
-  void refresh();
-  timer = window.setInterval(() => void refresh(), 10000);
+  timer = window.setInterval(() => void refresh(), POLL_MS);
 }
 
-function stop() {
+function stopTimer() {
   if (timer != null) {
     window.clearInterval(timer);
     timer = null;
   }
 }
 
+function onVisibilityChange() {
+  if (refcount <= 0) return;
+  if (document.hidden) {
+    stopTimer();
+  } else {
+    void refresh();
+    startTimer();
+  }
+}
+
 export function useWorkerStatus() {
   onMounted(() => {
     refcount++;
-    start();
+    if (!visibilityHooked) {
+      document.addEventListener("visibilitychange", onVisibilityChange);
+      visibilityHooked = true;
+    }
+    void refresh();
+    if (!document.hidden) startTimer();
   });
   onUnmounted(() => {
     refcount--;
     if (refcount <= 0) {
       refcount = 0;
-      stop();
+      stopTimer();
     }
   });
 

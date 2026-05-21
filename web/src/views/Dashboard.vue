@@ -51,27 +51,6 @@ const queuedJobs = computed(() =>
   recentJobs.value.filter((j) => j.status === "ready" || j.status === "waiting_for_seed"),
 );
 
-async function togglePause() {
-  if (!workerStatus.value) return;
-  const next = !workerStatus.value.paused;
-  const res = await notify.tryRun(
-    () => api.worker.setPaused(next),
-    next ? "Couldn't pause" : "Couldn't resume",
-  );
-  if (res !== undefined) {
-    if (next) {
-      notify.success(
-        res.cancelled > 0
-          ? `Encoding paused — ${res.cancelled} in-flight encode(s) re-queued`
-          : "Encoding paused",
-      );
-    } else {
-      notify.success("Encoding resumed");
-    }
-    await Promise.all([refreshWorker(), load()]);
-  }
-}
-
 // Each call updates its slice of state as soon as it returns, so the page
 // paints progressively instead of blocking on the slowest of the four. Errors
 // from any one call surface as a toast but don't kill the rest. Only the first
@@ -191,15 +170,6 @@ onUnmounted(() => {
         </span>
         <span v-else-if="workerStatus.paused" class="muted">· jobs continue to queue</span>
       </span>
-      <button
-        class="pause-btn"
-        type="button"
-        :title="workerStatus.paused ? 'Resume encoding' : 'Pause encoding'"
-        @click="togglePause"
-      >
-        <i class="pi" :class="workerStatus.paused ? 'pi-play' : 'pi-pause'"></i>
-        {{ workerStatus.paused ? "Resume" : "Pause" }}
-      </button>
       <span
         v-if="workerStatus.window?.hasLimit"
         class="strip-pill"
@@ -422,32 +392,6 @@ onUnmounted(() => {
 }
 .dot-paused {
   background: var(--rc-warn);
-}
-.pause-btn {
-  margin-left: auto;
-  background: transparent;
-  border: 1px solid var(--rc-border);
-  color: var(--rc-fg-2);
-  font: inherit;
-  font-size: 0.78rem;
-  padding: 0.25rem 0.6rem;
-  border-radius: var(--rc-r-sm);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  transition:
-    background 0.08s ease,
-    border-color 0.08s ease,
-    color 0.08s ease;
-}
-.pause-btn:hover {
-  background: var(--rc-surface-2);
-  border-color: var(--rc-border-strong);
-  color: var(--rc-fg);
-}
-.pause-btn .pi {
-  font-size: 0.72rem;
 }
 .dot-active {
   background: var(--rc-ok);

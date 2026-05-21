@@ -17,6 +17,17 @@ const notify = useNotify();
 const { status: workerStatus, refresh: refreshWorker } = useWorkerStatus();
 const pauseBusy = ref(false);
 
+const slotsLabel = computed(() => {
+  const ws = workerStatus.value;
+  if (!ws || !ws.maxParallelEncodes) return "";
+  return `${ws.encodingJobIds.length}/${ws.maxParallelEncodes}`;
+});
+
+const windowPaused = computed(() => {
+  const w = workerStatus.value?.window;
+  return Boolean(w?.hasLimit && !w.active);
+});
+
 async function togglePause() {
   if (!workerStatus.value || pauseBusy.value) return;
   const next = !workerStatus.value.paused;
@@ -110,6 +121,23 @@ const navItems = [
           </nav>
         </div>
         <div class="actions">
+          <span
+            v-if="username && workerStatus && slotsLabel"
+            class="slots-pill"
+            :class="{ active: workerStatus.isEncoding && !workerStatus.paused }"
+            :title="`${workerStatus.encodingJobIds.length} active encode(s) of ${workerStatus.maxParallelEncodes} slot(s)`"
+          >
+            <i class="pi pi-bolt"></i>
+            <span>{{ slotsLabel }}</span>
+          </span>
+          <span
+            v-if="username && windowPaused"
+            class="window-pill"
+            :title="`Encoding window ${workerStatus!.window.start}–${workerStatus!.window.end} — currently outside the window`"
+          >
+            <i class="pi pi-clock"></i>
+            <span class="window-pill-label">outside window</span>
+          </span>
           <button
             v-if="username && workerStatus"
             class="pause-btn"
@@ -264,6 +292,38 @@ const navItems = [
 }
 .icon-btn .pi {
   font-size: 0.85rem;
+}
+
+.slots-pill,
+.window-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  height: 24px;
+  padding: 0 0.5rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--rc-muted);
+  background: var(--rc-surface-2);
+  margin-right: 0.4rem;
+  user-select: none;
+}
+.slots-pill .pi,
+.window-pill .pi {
+  font-size: 0.7rem;
+}
+.slots-pill.active {
+  color: var(--rc-accent);
+}
+.window-pill {
+  color: var(--rc-warn, #d39e00);
+}
+@media (max-width: 640px) {
+  .slots-pill,
+  .window-pill {
+    display: none;
+  }
 }
 
 .pause-btn {
