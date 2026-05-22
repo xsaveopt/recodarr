@@ -73,6 +73,8 @@ jobs:
         with:
           context: .
           platforms: linux/amd64
+          provenance: false
+          sbom: false
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -98,6 +100,8 @@ jobs:
         with:
           context: .
           platforms: linux/amd64
+          provenance: false
+          sbom: false
           push: true
           tags: |
             ghcr.io/${{ github.repository_owner }}/recodarr:dev
@@ -139,6 +143,8 @@ jobs:
         with:
           context: .
           platforms: linux/amd64
+          provenance: false
+          sbom: false
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
