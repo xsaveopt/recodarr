@@ -201,16 +201,26 @@ const audioEncoderOptions = [
   { value: "ac3", label: "AC-3" },
 ];
 
+// PrimeVue's Select treats an empty-string option value as "no selection" and
+// renders the placeholder instead, so "Keep source layout" wouldn't show as
+// selected when reopening a profile. Use a non-empty sentinel in the UI and
+// translate to/from "" (the wire value that tells the backend to omit
+// --mixdown so HandBrake matches the source layout) via mixdownModel below.
+const KEEP_SOURCE_MIXDOWN = "__source__";
 const audioMixdownOptions = [
-  // Empty string = omit --mixdown from HandBrake args. HandBrake then matches
-  // the source channel layout for the chosen encoder where possible.
-  { value: "", label: "Keep source layout" },
+  { value: KEEP_SOURCE_MIXDOWN, label: "Keep source layout" },
   { value: "mono", label: "Mono" },
   { value: "stereo", label: "Stereo" },
   { value: "5point1", label: "5.1" },
   { value: "6point1", label: "6.1" },
   { value: "7point1", label: "7.1" },
 ];
+const mixdownModel = computed<string>({
+  get: () => editing.value?.audioMixdown || KEEP_SOURCE_MIXDOWN,
+  set: (v) => {
+    if (editing.value) editing.value.audioMixdown = v === KEEP_SOURCE_MIXDOWN ? "" : v;
+  },
+});
 
 const rateControlOptions = [
   { value: "crf", label: "CRF (constant quality)" },
@@ -602,7 +612,7 @@ onMounted(load);
               <label class="field">
                 <span>Mixdown</span>
                 <Select
-                  v-model="editing.audioMixdown"
+                  v-model="mixdownModel"
                   :options="audioMixdownOptions"
                   optionLabel="label"
                   optionValue="value"
