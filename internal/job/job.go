@@ -479,8 +479,10 @@ func (w *Worker) checkHardlinks(ctx context.Context) {
 
 // HardlinkCount returns the number of hardlinks to the file at path (st_nlink).
 // The syscall.Stat_t.Nlink field width differs by GOOS (uint16 on darwin,
-// uint64 on linux), so the result is normalized to uint64.
-func HardlinkCount(path string) (uint64, error) {
+// uint64 on linux); returning int64 makes the conversion real on both (so the
+// unconvert linter stays quiet on the linux build) and matches how counts are
+// typed elsewhere in the codebase.
+func HardlinkCount(path string) (int64, error) {
 	fi, err := os.Stat(path)
 	if err != nil {
 		return 0, err
@@ -489,7 +491,7 @@ func HardlinkCount(path string) (uint64, error) {
 	if !ok {
 		return 0, fmt.Errorf("hardlink count unavailable on this platform")
 	}
-	return uint64(st.Nlink), nil
+	return int64(st.Nlink), nil
 }
 
 // reresolveProfile returns the profile_id that the current tag→profile
