@@ -797,6 +797,17 @@ func queueArrLibrary(st *store.Store) http.HandlerFunc {
 				resp.Errors = append(resp.Errors, fmt.Sprintf("item %d: list files: %v", pid, err))
 				continue
 			}
+			// Recover the qBit infohash from *arr's import history (once per
+			// parent — a series response covers all its episodes). Lets backfill
+			// jobs be seed-checked by hash like webhook jobs, which is the only
+			// reliable signal when the library lives on a filesystem (e.g. NFS)
+			// that doesn't report st_nlink. A failure here is non-fatal: jobs
+			// just fall back to the waiting_for_hardlink heuristic below.
+			imports, herr := client.ImportHistory(r.Context(), pid)
+			if herr != nil {
+				slog.Warn("backfill: import history lookup failed; falling back to hardlink wait",
+					"kind", inst.Kind, "parent", pid, "err", herr)
+			}
 			tagsJSON, _ := json.Marshal([]string{meta.tagLabel})
 			for _, f := range files {
 				clean, err := sanitizeMediaPath(f.Path)
@@ -804,6 +815,16 @@ func queueArrLibrary(st *store.Store) http.HandlerFunc {
 					resp.Skipped++
 					resp.Errors = append(resp.Errors, fmt.Sprintf("file %s: %v", f.Path, err))
 					continue
+				}
+				// With a recovered hash the job is qBit-pollable (waiting_for_seed);
+				// without one we fall back to waiting_for_hardlink, which the worker
+				// releases once the library file has no remaining hardlinks. The
+				// hardlink heuristic is unreliable on NFS (st_nlink reads 1), so the
+				// history path is strongly preferred when available.
+				downloadID := arr.MatchImportDownloadID(imports, arr.Kind(inst.Kind), clean, f.RelativePath)
+				status := string(job.StatusWaitingForHardlink)
+				if downloadID != "" {
+					status = string(job.StatusWaitingForSeed)
 				}
 				jr := store.JobRow{
 					ArrKind:       inst.Kind,
@@ -813,16 +834,11 @@ func queueArrLibrary(st *store.Store) http.HandlerFunc {
 					Title:         meta.title,
 					FilePath:      clean,
 					FileSize:      f.Size,
+					DownloadID:    downloadID,
 					ProfileID:     sql.NullInt64{Int64: meta.mapping.ProfileID, Valid: true},
-					// Backfill jobs carry no DownloadID (the *arr library API
-					// doesn't expose the qBit hash), so they can't be seed-checked
-					// against qBit. They enter waiting_for_hardlink instead, where
-					// the worker (checkHardlinks) releases them to 'ready' once the
-					// library file has no remaining hardlinks — i.e. qBit has
-					// removed its download copy and is no longer seeding.
-					Status: string(job.StatusWaitingForHardlink),
-					Tags:   string(tagsJSON),
-					Source: "backfill",
+					Status:        status,
+					Tags:          string(tagsJSON),
+					Source:        "backfill",
 				}
 				newID, err := enqueueIfNew(r.Context(), st, jr)
 				if err != nil {

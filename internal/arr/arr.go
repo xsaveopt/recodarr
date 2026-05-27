@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 )
@@ -238,6 +239,79 @@ func (c *Client) Files(ctx context.Context, parentID int64) ([]LibraryFile, erro
 	default:
 		return nil, fmt.Errorf("unknown arr kind %q", c.kind)
 	}
+}
+
+// ImportEvent is a single downloadFolderImported history record, reduced to the
+// fields backfill needs: where the file landed and which download-client item
+// (for qBittorrent, the torrent infohash) produced it.
+type ImportEvent struct {
+	DownloadID   string
+	ImportedPath string
+	Date         time.Time
+}
+
+// historyRecord is the subset of a Sonarr/Radarr history record we decode.
+type historyRecord struct {
+	DownloadID string    `json:"downloadId"`
+	EventType  string    `json:"eventType"`
+	Date       time.Time `json:"date"`
+	Data       struct {
+		ImportedPath string `json:"importedPath"`
+	} `json:"data"`
+}
+
+// ImportHistory returns this parent's downloadFolderImported events (those that
+// carry a download id), newest first. *arr's library API doesn't expose the
+// download-client hash, but its import history does — this is how a backfilled
+// library file recovers a torrent hash to poll qBit with. A series response
+// covers every episode; callers match the right event by path.
+func (c *Client) ImportHistory(ctx context.Context, parentID int64) ([]ImportEvent, error) {
+	var path string
+	switch c.kind {
+	case KindSonarr:
+		path = fmt.Sprintf("/api/v3/history/series?seriesId=%d", parentID)
+	case KindRadarr:
+		path = fmt.Sprintf("/api/v3/history/movie?movieId=%d", parentID)
+	default:
+		return nil, fmt.Errorf("unknown arr kind %q", c.kind)
+	}
+	var records []historyRecord
+	if err := c.getJSON(ctx, path, &records); err != nil {
+		return nil, fmt.Errorf("%s import history: %w", c.kind, err)
+	}
+	out := make([]ImportEvent, 0, len(records))
+	for _, r := range records {
+		if r.EventType != "downloadFolderImported" || r.DownloadID == "" {
+			continue
+		}
+		out = append(out, ImportEvent{DownloadID: r.DownloadID, ImportedPath: r.Data.ImportedPath, Date: r.Date})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Date.After(out[j].Date) })
+	return out, nil
+}
+
+// MatchImportDownloadID picks the download id for the file at absPath from a
+// parent's import events (as returned by ImportHistory, newest first). It
+// matches on the imported path — exact, or by relative-path suffix to tolerate
+// the OS path-separator differing between the *arr host and Recodarr. For
+// Radarr (one file per movie) it falls back to the most recent import when no
+// path matches, since any import for that movie refers to the same file; for
+// Sonarr it never cross-matches episodes. Returns "" when nothing matches.
+func MatchImportDownloadID(events []ImportEvent, kind Kind, absPath, relativePath string) string {
+	relNorm := strings.ReplaceAll(relativePath, "\\", "/")
+	for _, e := range events {
+		imp := e.ImportedPath
+		if imp == absPath {
+			return e.DownloadID
+		}
+		if relNorm != "" && strings.HasSuffix(strings.ReplaceAll(imp, "\\", "/"), "/"+relNorm) {
+			return e.DownloadID
+		}
+	}
+	if kind == KindRadarr && len(events) > 0 {
+		return events[0].DownloadID
+	}
+	return ""
 }
 
 // Ping verifies connectivity and API key, distinguishing 401 from other errors.
