@@ -35,13 +35,13 @@ type QbitInstanceRow struct {
 }
 
 type ProfileRow struct {
-	ID              int64
-	Name            string
-	Encoder         string
-	EncoderPreset   string
-	EncoderProfile  string
-	EncoderTune     string
-	EncoderLevel    string
+	ID             int64
+	Name           string
+	Encoder        string
+	EncoderPreset  string
+	EncoderProfile string
+	EncoderTune    string
+	EncoderLevel   string
 	// RateControl is either "crf" (constant quality, uses Quality) or "abr"
 	// (average bitrate, uses VideoBitrate). Empty defaults to "crf".
 	RateControl     string
@@ -58,26 +58,26 @@ type ProfileRow struct {
 	AudioBitrate    int
 	AudioMixdown    string
 	// Pre-encode filters; zero/empty = filter inactive.
-	SkipCodecs            string // comma-separated, lowercase, e.g. "av1,hevc"
-	SkipBitrateMBPerHour  int
+	SkipCodecs           string // comma-separated, lowercase, e.g. "av1,hevc"
+	SkipBitrateMBPerHour int
 	// SkipBitrateUnit selects how SkipBitrateMBPerHour is interpreted:
 	// "mb_per_hour" (default, the legacy meaning) or "kbps". The column name
 	// was kept for backward compatibility; the number is just "bitrate threshold".
-	SkipBitrateUnit       string
-	SkipFileSizeMB        int
-	SkipDurationMinutes   int
-	SkipHeightPx          int
-	SkipHDR               bool
+	SkipBitrateUnit     string
+	SkipFileSizeMB      int
+	SkipDurationMinutes int
+	SkipHeightPx        int
+	SkipHDR             bool
 	// Post-encode size guard.
-	BloatPolicy             string // "off" | "keep_original" | "retry_higher_crf"
-	BloatRetryMax           int
-	BloatRetryStep          int
-	BloatMinSavingsPercent  int
+	BloatPolicy            string // "off" | "keep_original" | "retry_higher_crf"
+	BloatRetryMax          int
+	BloatRetryStep         int
+	BloatMinSavingsPercent int
 	// DeletedAt is set when the profile has been soft-deleted. List endpoints
 	// hide soft-deleted profiles by default; GetProfile still returns them so
 	// historical job rows resolve a name. Tag mappings pointing at a deleted
 	// profile are dropped at delete time (see DeleteProfile).
-	DeletedAt               sql.NullTime
+	DeletedAt sql.NullTime
 }
 
 type TagMappingRow struct {
@@ -121,13 +121,14 @@ type JobRow struct {
 }
 
 type JobStatsRow struct {
-	WaitingForSeed  int64
-	Ready           int64
-	Encoding        int64
-	Done            int64
-	Failed          int64
-	Skipped         int64
-	TotalSavedBytes int64
+	WaitingForSeed     int64
+	WaitingForHardlink int64
+	Ready              int64
+	Encoding           int64
+	Done               int64
+	Failed             int64
+	Skipped            int64
+	TotalSavedBytes    int64
 }
 
 const jobCols = `id,arr_kind,arr_instance_id,arr_item_id,arr_parent_id,title,file_path,file_size,download_id,profile_id,status,error,encode_log,refresh_error,attempts,created_at,updated_at,started_at,finished_at,original_size,final_size,tags,source`
@@ -616,13 +617,14 @@ func (s *Store) GetJobStats(ctx context.Context) (JobStatsRow, error) {
 	err := s.DB.QueryRowContext(ctx, `
 		SELECT
 			COALESCE(SUM(CASE WHEN status='waiting_for_seed' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status='waiting_for_hardlink' THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN status='ready' THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN status='encoding' THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN status='done' THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN status='skipped' THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN status='done' AND original_size IS NOT NULL AND final_size IS NOT NULL THEN original_size - final_size ELSE 0 END), 0)
-		FROM jobs`).Scan(&r.WaitingForSeed, &r.Ready, &r.Encoding, &r.Done, &r.Failed, &r.Skipped, &r.TotalSavedBytes)
+		FROM jobs`).Scan(&r.WaitingForSeed, &r.WaitingForHardlink, &r.Ready, &r.Encoding, &r.Done, &r.Failed, &r.Skipped, &r.TotalSavedBytes)
 	return r, err
 }
 
@@ -834,7 +836,7 @@ func (s *Store) DeleteJob(ctx context.Context, id int64) error {
 
 // terminalStatuses is the canonical set DeleteTerminalJobs / DeleteJobsByIDs
 // will touch. Encoding jobs are never deleted here — cancel them first.
-var terminalStatuses = []string{"done", "failed", "skipped", "waiting_for_seed", "ready"}
+var terminalStatuses = []string{"done", "failed", "skipped", "waiting_for_seed", "waiting_for_hardlink", "ready"}
 
 func isTerminalDeletable(s string) bool {
 	for _, t := range terminalStatuses {

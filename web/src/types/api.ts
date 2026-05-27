@@ -100,6 +100,7 @@ export interface DebugInfo {
 
 export type JobStatus =
   | "waiting_for_seed"
+  | "waiting_for_hardlink"
   | "ready"
   | "encoding"
   | "done"
@@ -244,6 +245,7 @@ export interface WindowStatus {
 
 export interface JobStats {
   waitingForSeed: number;
+  waitingForHardlink: number;
   ready: number;
   encoding: number;
   done: number;

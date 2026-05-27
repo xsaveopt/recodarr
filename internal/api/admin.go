@@ -18,12 +18,12 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/sratabix/recodarr/internal/agent"
+	"github.com/sratabix/recodarr/internal/arr"
 	"github.com/sratabix/recodarr/internal/handbrake"
 	"github.com/sratabix/recodarr/internal/health"
 	"github.com/sratabix/recodarr/internal/job"
 	"github.com/sratabix/recodarr/internal/logging"
 	"github.com/sratabix/recodarr/internal/qbit"
-	"github.com/sratabix/recodarr/internal/arr"
 	"github.com/sratabix/recodarr/internal/store"
 )
 
@@ -45,7 +45,7 @@ type arrInstanceDTO struct {
 	Kind          string `json:"kind"`
 	Name          string `json:"name"`
 	URL           string `json:"url"`
-	APIKey        string `json:"apiKey,omitempty"`        // write-only; never returned
+	APIKey        string `json:"apiKey,omitempty"` // write-only; never returned
 	Enabled       bool   `json:"enabled"`
 	WebhookSecret string `json:"webhookSecret,omitempty"` // write-only; copyable URL is enough
 	HasAPIKey     bool   `json:"hasApiKey"`
@@ -132,7 +132,7 @@ func profileRowToDTO(r store.ProfileRow) profileDTO {
 		AudioBitrate: r.AudioBitrate, AudioMixdown: r.AudioMixdown,
 		SubtitleCopy: r.SubtitleCopy, TwoPass: r.TwoPass,
 		ContainerFormat: r.ContainerFormat, ExtraArgs: r.ExtraArgs,
-		Framerate: r.Framerate,
+		Framerate:              r.Framerate,
 		SkipCodecs:             r.SkipCodecs,
 		SkipBitrateMBPerHour:   r.SkipBitrateMBPerHour,
 		SkipBitrateUnit:        r.SkipBitrateUnit,
@@ -165,13 +165,14 @@ type instanceTagDTO struct {
 }
 
 type statsDTO struct {
-	WaitingForSeed  int64 `json:"waitingForSeed"`
-	Ready           int64 `json:"ready"`
-	Encoding        int64 `json:"encoding"`
-	Done            int64 `json:"done"`
-	Failed          int64 `json:"failed"`
-	Skipped         int64 `json:"skipped"`
-	TotalSavedBytes int64 `json:"totalSavedBytes"`
+	WaitingForSeed     int64 `json:"waitingForSeed"`
+	WaitingForHardlink int64 `json:"waitingForHardlink"`
+	Ready              int64 `json:"ready"`
+	Encoding           int64 `json:"encoding"`
+	Done               int64 `json:"done"`
+	Failed             int64 `json:"failed"`
+	Skipped            int64 `json:"skipped"`
+	TotalSavedBytes    int64 `json:"totalSavedBytes"`
 }
 
 // LogLevelSetter is the surface area the settings handler needs to push live
@@ -203,13 +204,14 @@ func registerAdminRoutes(r chi.Router, st *store.Store, w workerClient, hc *heal
 			return
 		}
 		writeJSON(rw, http.StatusOK, statsDTO{
-			WaitingForSeed:  stats.WaitingForSeed,
-			Ready:           stats.Ready,
-			Encoding:        stats.Encoding,
-			Done:            stats.Done,
-			Failed:          stats.Failed,
-			Skipped:         stats.Skipped,
-			TotalSavedBytes: stats.TotalSavedBytes,
+			WaitingForSeed:     stats.WaitingForSeed,
+			WaitingForHardlink: stats.WaitingForHardlink,
+			Ready:              stats.Ready,
+			Encoding:           stats.Encoding,
+			Done:               stats.Done,
+			Failed:             stats.Failed,
+			Skipped:            stats.Skipped,
+			TotalSavedBytes:    stats.TotalSavedBytes,
 		})
 	})
 
@@ -812,13 +814,13 @@ func queueArrLibrary(st *store.Store) http.HandlerFunc {
 					FilePath:      clean,
 					FileSize:      f.Size,
 					ProfileID:     sql.NullInt64{Int64: meta.mapping.ProfileID, Valid: true},
-					// Same state machine as webhook-driven jobs. We don't know
-					// a DownloadID for backfill, so checkSeeding will auto-
-					// transition to 'ready' on the next tick without polling
-					// qBit (job.go:398). Keeping the same entry state means
-					// any future "match torrent by path" logic plugs in
-					// without a flow split.
-					Status: string(job.StatusWaitingForSeed),
+					// Backfill jobs carry no DownloadID (the *arr library API
+					// doesn't expose the qBit hash), so they can't be seed-checked
+					// against qBit. They enter waiting_for_hardlink instead, where
+					// the worker (checkHardlinks) releases them to 'ready' once the
+					// library file has no remaining hardlinks — i.e. qBit has
+					// removed its download copy and is no longer seeding.
+					Status: string(job.StatusWaitingForHardlink),
 					Tags:   string(tagsJSON),
 					Source: "backfill",
 				}
@@ -1032,7 +1034,7 @@ func upsertProfile(st *store.Store) http.HandlerFunc {
 			AudioBitrate: d.AudioBitrate, AudioMixdown: d.AudioMixdown,
 			SubtitleCopy: d.SubtitleCopy, TwoPass: d.TwoPass,
 			ContainerFormat: d.ContainerFormat, ExtraArgs: d.ExtraArgs,
-			Framerate:            d.Framerate,
+			Framerate:              d.Framerate,
 			SkipCodecs:             strings.ToLower(strings.TrimSpace(d.SkipCodecs)),
 			SkipBitrateMBPerHour:   d.SkipBitrateMBPerHour,
 			SkipBitrateUnit:        d.SkipBitrateUnit,
@@ -1416,10 +1418,10 @@ func splitNonEmpty(s string) []string {
 }
 
 type jobsPageDTO struct {
-	Total  int64     `json:"total"`
-	Limit  int       `json:"limit"`
-	Offset int       `json:"offset"`
-	Jobs   []jobDTO  `json:"jobs"`
+	Total  int64    `json:"total"`
+	Limit  int      `json:"limit"`
+	Offset int      `json:"offset"`
+	Jobs   []jobDTO `json:"jobs"`
 }
 
 func listJobs(st *store.Store) http.HandlerFunc {
@@ -1525,16 +1527,16 @@ func cancelJob(st *store.Store, wk workerClient) http.HandlerFunc {
 // job is stuck — particularly why a waiting_for_seed job hasn't transitioned.
 // Everything here is read-only and computed live; nothing is persisted.
 type jobDebugDTO struct {
-	JobID            int64             `json:"jobId"`
-	Status           string            `json:"status"`
-	DownloadID       string            `json:"downloadId"`
-	DownloadIDLength int               `json:"downloadIdLength"`
-	FilePath         string            `json:"filePath"`
-	Attempts         int64             `json:"attempts"`
-	Qbit             jobDebugQbitDTO   `json:"qbit"`
-	WaitingForSeed   int64             `json:"waitingForSeedCount"`
-	SeedCheckLimit   int               `json:"seedCheckBatchLimit"`
-	StalledReason    string            `json:"stalledReason,omitempty"`
+	JobID            int64              `json:"jobId"`
+	Status           string             `json:"status"`
+	DownloadID       string             `json:"downloadId"`
+	DownloadIDLength int                `json:"downloadIdLength"`
+	FilePath         string             `json:"filePath"`
+	Attempts         int64              `json:"attempts"`
+	Qbit             jobDebugQbitDTO    `json:"qbit"`
+	WaitingForSeed   int64              `json:"waitingForSeedCount"`
+	SeedCheckLimit   int                `json:"seedCheckBatchLimit"`
+	StalledReason    string             `json:"stalledReason,omitempty"`
 	Encode           *jobDebugEncodeDTO `json:"encode,omitempty"`
 }
 
@@ -1542,27 +1544,27 @@ type jobDebugDTO struct {
 // skipped). Populated whenever original_size/final_size or an error/skip
 // reason exists on the row.
 type jobDebugEncodeDTO struct {
-	ProfileID       *int64  `json:"profileId,omitempty"`
-	ProfileName     string  `json:"profileName,omitempty"`
-	ProfileEncoder  string  `json:"profileEncoder,omitempty"`
-	OriginalBytes   *int64  `json:"originalBytes,omitempty"`
-	FinalBytes      *int64  `json:"finalBytes,omitempty"`
-	SavedBytes      *int64  `json:"savedBytes,omitempty"`
+	ProfileID       *int64   `json:"profileId,omitempty"`
+	ProfileName     string   `json:"profileName,omitempty"`
+	ProfileEncoder  string   `json:"profileEncoder,omitempty"`
+	OriginalBytes   *int64   `json:"originalBytes,omitempty"`
+	FinalBytes      *int64   `json:"finalBytes,omitempty"`
+	SavedBytes      *int64   `json:"savedBytes,omitempty"`
 	SavedPercent    *float64 `json:"savedPercent,omitempty"`
-	StartedAt       string  `json:"startedAt,omitempty"`
-	FinishedAt      string  `json:"finishedAt,omitempty"`
-	DurationSeconds *int64  `json:"durationSeconds,omitempty"`
-	Error           string  `json:"error,omitempty"`
-	RefreshError    string  `json:"refreshError,omitempty"`
+	StartedAt       string   `json:"startedAt,omitempty"`
+	FinishedAt      string   `json:"finishedAt,omitempty"`
+	DurationSeconds *int64   `json:"durationSeconds,omitempty"`
+	Error           string   `json:"error,omitempty"`
+	RefreshError    string   `json:"refreshError,omitempty"`
 }
 
 type jobDebugQbitDTO struct {
-	Configured   bool                 `json:"configured"`
-	URL          string               `json:"url,omitempty"`
-	Reachable    bool                 `json:"reachable"`
-	LoginError   string               `json:"loginError,omitempty"`
-	Lookup       *jobDebugLookupDTO   `json:"lookup,omitempty"`
-	LookupError  string               `json:"lookupError,omitempty"`
+	Configured  bool               `json:"configured"`
+	URL         string             `json:"url,omitempty"`
+	Reachable   bool               `json:"reachable"`
+	LoginError  string             `json:"loginError,omitempty"`
+	Lookup      *jobDebugLookupDTO `json:"lookup,omitempty"`
+	LookupError string             `json:"lookupError,omitempty"`
 }
 
 type jobDebugLookupDTO struct {
@@ -1647,6 +1649,21 @@ func debugJob(st *store.Store) http.HandlerFunc {
 				enc.DurationSeconds = &d
 			}
 			out.Encode = enc
+		}
+
+		// waiting_for_hardlink is a backfill-only state with no qBit involvement:
+		// the worker releases it to 'ready' once the library file has no other
+		// hardlinks. Report the live link count so a stuck job is explainable.
+		if row.Status == string(job.StatusWaitingForHardlink) {
+			if n, err := job.HardlinkCount(row.FilePath); err != nil {
+				out.StalledReason = fmt.Sprintf("Can't stat the library file (%v). The worker will release this job to 'ready' on the next tick so the encode surfaces the error.", err)
+			} else if n > 1 {
+				out.StalledReason = fmt.Sprintf("Library file still has %d hardlinks — qBittorrent is likely still seeding its download copy. The job releases to 'ready' once the count drops to 1 (qBit auto-remove on completion).", n)
+			} else {
+				out.StalledReason = "Library file has a single hardlink — the worker should release this job to 'ready' on the next tick (within ~30s)."
+			}
+			writeJSON(w, http.StatusOK, out)
+			return
 		}
 
 		qbitRow, err := st.FirstQbitInstance(r.Context())

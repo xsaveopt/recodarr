@@ -36,7 +36,7 @@ const rangeAnchorId = ref<number | null>(null);
 
 // Statuses the user can pick in the Clear History dialog. Encoding jobs are
 // never deletable from here — cancel them first.
-const CLEARABLE_STATUSES = ["done", "failed", "skipped", "waiting_for_seed", "ready"] as const;
+const CLEARABLE_STATUSES = ["done", "failed", "skipped", "waiting_for_seed", "waiting_for_hardlink", "ready"] as const;
 const clearDialogOpen = ref(false);
 const clearStatuses = ref<string[]>(["done", "failed", "skipped"]);
 
@@ -63,7 +63,7 @@ const bulkProfileOptions = computed(() => [
 
 // All known values — the multi-select defaults to all of them checked, so
 // "show everything" is the visual default and the user un-checks to filter out.
-const ALL_STATUSES = ["waiting_for_seed", "ready", "encoding", "done", "failed", "skipped"] as const;
+const ALL_STATUSES = ["waiting_for_seed", "waiting_for_hardlink", "ready", "encoding", "done", "failed", "skipped"] as const;
 const ALL_KINDS = ["sonarr", "radarr"] as const;
 
 function parseList(raw: string | string[] | undefined, allowed: readonly string[]): string[] {
@@ -152,6 +152,7 @@ let timer: number | null = null;
 
 const statusOptions = [
   { value: "waiting_for_seed", label: "Waiting for seed" },
+  { value: "waiting_for_hardlink", label: "Waiting for hardlink" },
   { value: "ready", label: "Ready" },
   { value: "encoding", label: "Encoding" },
   { value: "done", label: "Done" },
@@ -412,6 +413,7 @@ async function bulkRetry() {
 
 const severities: Record<JobStatus, "info" | "warn" | "success" | "danger" | "secondary"> = {
   waiting_for_seed: "secondary",
+  waiting_for_hardlink: "secondary",
   ready: "info",
   encoding: "warn",
   done: "success",

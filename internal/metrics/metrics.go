@@ -162,6 +162,7 @@ func (c *collector) Collect(ch chan<- prometheus.Metric) {
 
 	if stats, err := c.store.GetJobStats(ctx); err == nil {
 		ch <- prometheus.MustNewConstMetric(c.jobsByStatus, prometheus.GaugeValue, float64(stats.WaitingForSeed), "waiting_for_seed")
+		ch <- prometheus.MustNewConstMetric(c.jobsByStatus, prometheus.GaugeValue, float64(stats.WaitingForHardlink), "waiting_for_hardlink")
 		ch <- prometheus.MustNewConstMetric(c.jobsByStatus, prometheus.GaugeValue, float64(stats.Ready), "ready")
 		ch <- prometheus.MustNewConstMetric(c.jobsByStatus, prometheus.GaugeValue, float64(stats.Encoding), "encoding")
 		ch <- prometheus.MustNewConstMetric(c.jobsByStatus, prometheus.GaugeValue, float64(stats.Done), "done")

@@ -27,12 +27,13 @@ import (
 type Status string
 
 const (
-	StatusWaitingForSeed Status = "waiting_for_seed"
-	StatusReady          Status = "ready"
-	StatusEncoding       Status = "encoding"
-	StatusDone           Status = "done"
-	StatusFailed         Status = "failed"
-	StatusSkipped        Status = "skipped"
+	StatusWaitingForSeed     Status = "waiting_for_seed"
+	StatusWaitingForHardlink Status = "waiting_for_hardlink"
+	StatusReady              Status = "ready"
+	StatusEncoding           Status = "encoding"
+	StatusDone               Status = "done"
+	StatusFailed             Status = "failed"
+	StatusSkipped            Status = "skipped"
 )
 
 type Job struct {
@@ -371,6 +372,7 @@ func (w *Worker) tick(ctx context.Context) {
 	w.lastTickAt = time.Now()
 	w.mu.Unlock()
 	w.checkSeeding(ctx)
+	w.checkHardlinks(ctx)
 	w.runEncodes(ctx)
 }
 
@@ -396,7 +398,7 @@ func (w *Worker) checkSeeding(ctx context.Context) {
 	hashJobs := make(map[string][]int64, len(jobs))
 	for _, j := range jobs {
 		if j.DownloadID == "" {
-			w.transition(ctx, j.ID, string(StatusWaitingForSeed), string(StatusReady), "no downloadId, skipping seed check")
+			w.transition(ctx, j.ID, string(StatusWaitingForSeed), "no downloadId, skipping seed check")
 			continue
 		}
 		h := strings.ToLower(j.DownloadID)
@@ -439,9 +441,55 @@ func (w *Worker) checkSeeding(ctx context.Context) {
 			continue
 		}
 		for _, id := range ids {
-			w.transition(ctx, id, string(StatusWaitingForSeed), string(StatusReady), "qbit no longer holds torrent")
+			w.transition(ctx, id, string(StatusWaitingForSeed), "qbit no longer holds torrent")
 		}
 	}
+}
+
+// checkHardlinks moves library-backfill jobs from waiting_for_hardlink → ready
+// once the library file has no remaining hardlinks elsewhere. Backfill jobs
+// carry no downloadId (the *arr library API doesn't expose the qBit hash), so
+// they can't be seed-checked against qBit. Instead we lean on the project's
+// documented setup — qBit auto-remove + *arr hardlink imports — where the
+// library file and qBit's download copy share an inode. While qBit still seeds,
+// st_nlink > 1; once qBit removes the torrent, nlink drops to 1 and the encode
+// is safe. The check fails OPEN on stat errors (missing file, copy-mode imports
+// on a different filesystem where nlink is always 1): we'd rather encode than
+// wedge a job forever, and a missing file surfaces clearly as an encode failure.
+func (w *Worker) checkHardlinks(ctx context.Context) {
+	jobs, err := w.store.JobsByStatus(ctx, string(StatusWaitingForHardlink), SeedCheckBatchLimit)
+	if err != nil {
+		slog.Error("checkHardlinks list", "err", err)
+		return
+	}
+	for _, j := range jobs {
+		n, err := HardlinkCount(j.FilePath)
+		if err != nil {
+			slog.Warn("checkHardlinks stat failed; releasing job to ready", "id", j.ID, "path", j.FilePath, "err", err)
+			w.transition(ctx, j.ID, string(StatusWaitingForHardlink), "stat failed, cannot detect seeding")
+			continue
+		}
+		if n > 1 {
+			slog.Debug("library file still has extra hardlinks, likely seeding", "id", j.ID, "path", j.FilePath, "links", n)
+			continue
+		}
+		w.transition(ctx, j.ID, string(StatusWaitingForHardlink), "no remaining hardlinks, torrent gone")
+	}
+}
+
+// HardlinkCount returns the number of hardlinks to the file at path (st_nlink).
+// The syscall.Stat_t.Nlink field width differs by GOOS (uint16 on darwin,
+// uint64 on linux), so the result is normalized to uint64.
+func HardlinkCount(path string) (uint64, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return 0, err
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return 0, fmt.Errorf("hardlink count unavailable on this platform")
+	}
+	return uint64(st.Nlink), nil
 }
 
 // reresolveProfile returns the profile_id that the current tag→profile
@@ -480,7 +528,11 @@ func (w *Worker) reresolveProfile(ctx context.Context, j store.JobRow) (sql.Null
 	return resolved, true
 }
 
-func (w *Worker) transition(ctx context.Context, id int64, from, to, reason string) {
+// transition advances a job from a given status to 'ready'. Every worker-driven
+// status change in this file moves a queued job forward into the encode queue,
+// so the destination is fixed; only the source status varies.
+func (w *Worker) transition(ctx context.Context, id int64, from, reason string) {
+	to := string(StatusReady)
 	ok, err := w.store.TransitionJobStatus(ctx, id, from, to)
 	if err != nil {
 		slog.Error("transition", "id", id, "err", err)

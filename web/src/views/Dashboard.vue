@@ -48,7 +48,12 @@ const slotsLabel = computed(() => {
 });
 
 const queuedJobs = computed(() =>
-  recentJobs.value.filter((j) => j.status === "ready" || j.status === "waiting_for_seed"),
+  recentJobs.value.filter(
+    (j) =>
+      j.status === "ready" ||
+      j.status === "waiting_for_seed" ||
+      j.status === "waiting_for_hardlink",
+  ),
 );
 
 // Each call updates its slice of state as soon as it returns, so the page
@@ -104,10 +109,17 @@ function formatBytes(n: number) {
 }
 
 function statusLabel(s: JobStatus): string {
-  return s === "waiting_for_seed" ? "seeding" : s;
+  if (s === "waiting_for_seed") return "seeding";
+  if (s === "waiting_for_hardlink") return "seeding (hardlink)";
+  return s;
 }
 
-const queued = computed(() => (stats.value?.ready ?? 0) + (stats.value?.waitingForSeed ?? 0));
+const queued = computed(
+  () =>
+    (stats.value?.ready ?? 0) +
+    (stats.value?.waitingForSeed ?? 0) +
+    (stats.value?.waitingForHardlink ?? 0),
+);
 
 const isEmpty = computed(() => {
   const s = stats.value;
@@ -117,6 +129,7 @@ const isEmpty = computed(() => {
     s.encoding === 0 &&
     s.ready === 0 &&
     s.waitingForSeed === 0 &&
+    s.waitingForHardlink === 0 &&
     s.failed === 0 &&
     s.skipped === 0
   );
@@ -617,6 +630,9 @@ a.stat:hover {
   background: var(--rc-info);
 }
 .marker-waiting_for_seed {
+  background: var(--rc-faint);
+}
+.marker-waiting_for_hardlink {
   background: var(--rc-faint);
 }
 .marker-encoding {
