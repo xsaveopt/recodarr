@@ -166,6 +166,8 @@ export interface JobListParams {
   q?: string;
   limit?: number;
   offset?: number;
+  // "asc" orders by id ascending (the worker's encode order); default is "desc".
+  order?: "asc" | "desc";
 }
 
 export interface JobsPage {

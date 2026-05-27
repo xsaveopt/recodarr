@@ -11,6 +11,8 @@ import type { HealthSnapshot, Job, JobStats, JobStatus } from "@/types/api";
 const notify = useNotify();
 const stats = ref<JobStats | null>(null);
 const recentJobs = ref<Job[]>([]);
+// Ready jobs in the worker's actual claim order (id ASC) — i.e. what encodes next.
+const upNext = ref<Job[]>([]);
 const { status: workerStatus, refresh: refreshWorker } = useWorkerStatus();
 const health = ref<HealthSnapshot | null>(null);
 let timer: number | null = null;
@@ -47,13 +49,11 @@ const slotsLabel = computed(() => {
   return `${ws.encodingJobIds.length} / ${ws.maxParallelEncodes}`;
 });
 
-const queuedJobs = computed(() =>
-  recentJobs.value.filter(
-    (j) =>
-      j.status === "ready" ||
-      j.status === "waiting_for_seed" ||
-      j.status === "waiting_for_hardlink",
-  ),
+// Ready jobs beyond the few we list, plus jobs still waiting on seeding — shown
+// as small footnotes so the Up next list stays focused on what's imminent.
+const moreReady = computed(() => Math.max(0, (stats.value?.ready ?? 0) - upNext.value.length));
+const waitingCount = computed(
+  () => (stats.value?.waitingForSeed ?? 0) + (stats.value?.waitingForHardlink ?? 0),
 );
 
 // Each call updates its slice of state as soon as it returns, so the page
@@ -77,6 +77,13 @@ async function load(silent = false) {
     }),
     loadOne(() => api.jobs.list({ limit: 12 }), "Couldn't load recent jobs", silent).then((r) => {
       if (r) recentJobs.value = r.jobs;
+    }),
+    loadOne(
+      () => api.jobs.list({ status: "ready", order: "asc", limit: 8 }),
+      "Couldn't load queue",
+      silent,
+    ).then((r) => {
+      if (r) upNext.value = r.jobs;
     }),
     refreshWorker().then(() => {
       if (workerStatus.value) prune(workerStatus.value.encodingJobIds);
@@ -266,17 +273,22 @@ onUnmounted(() => {
     <div class="grid">
       <section class="block">
         <div class="block-head">
-          <h2 class="block-title">Queue</h2>
-          <RouterLink :to="{ name: 'jobs' }" class="block-link">All jobs →</RouterLink>
+          <h2 class="block-title">Up next</h2>
+          <RouterLink :to="{ name: 'jobs', query: { status: 'ready' } }" class="block-link"
+            >Queue →</RouterLink
+          >
         </div>
-        <ul v-if="queuedJobs.length" class="list">
-          <li v-for="j in queuedJobs" :key="j.id" class="list-row">
-            <span class="row-marker" :class="`marker-${j.status}`"></span>
+        <ol v-if="upNext.length" class="list">
+          <li v-for="(j, i) in upNext" :key="j.id" class="list-row">
+            <span class="row-pos tnum">{{ i + 1 }}</span>
             <span class="row-title" :title="j.title">{{ j.title }}</span>
-            <span class="row-status muted">{{ statusLabel(j.status) }}</span>
           </li>
-        </ul>
-        <p v-else class="empty">Nothing queued.</p>
+        </ol>
+        <p v-else class="empty">Nothing ready to encode.</p>
+        <div v-if="moreReady || waitingCount" class="queue-foot muted">
+          <span v-if="moreReady">+{{ moreReady }} more ready</span>
+          <span v-if="waitingCount">{{ waitingCount }} waiting on seeding</span>
+        </div>
       </section>
 
       <section class="block">
@@ -648,6 +660,14 @@ a.stat:hover {
   background: transparent;
   border: 1.5px solid var(--rc-faint);
 }
+.row-pos {
+  width: 1.4rem;
+  flex-shrink: 0;
+  text-align: right;
+  font-size: 0.78rem;
+  color: var(--rc-muted);
+  font-variant-numeric: tabular-nums;
+}
 .row-title {
   flex: 1;
   min-width: 0;
@@ -655,6 +675,12 @@ a.stat:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--rc-fg);
+}
+.queue-foot {
+  display: flex;
+  gap: 0.85rem;
+  margin: 0.55rem 0 0;
+  font-size: 0.75rem;
 }
 .row-status,
 .row-saved {

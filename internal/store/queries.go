@@ -530,6 +530,10 @@ type JobListOptions struct {
 	Search    string // case-insensitive substring match against title
 	Limit     int    // 0 = default 50; capped at 500
 	Offset    int
+	// Ascending orders by id ASC instead of the default DESC. id ASC matches the
+	// worker's claim order (oldest ready job first), so it's the true
+	// "next to encode" order — used by the dashboard's Up next list.
+	Ascending bool
 }
 
 func (s *Store) ListJobs(ctx context.Context, opts JobListOptions) ([]JobRow, int64, error) {
@@ -547,9 +551,13 @@ func (s *Store) ListJobs(ctx context.Context, opts JobListOptions) ([]JobRow, in
 		return nil, 0, err
 	}
 
+	order := "DESC"
+	if opts.Ascending {
+		order = "ASC"
+	}
 	pageArgs := append(append([]any{}, args...), limit, opts.Offset)
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT `+jobCols+` FROM jobs `+where+` ORDER BY id DESC LIMIT ? OFFSET ?`, pageArgs...)
+		`SELECT `+jobCols+` FROM jobs `+where+` ORDER BY id `+order+` LIMIT ? OFFSET ?`, pageArgs...)
 	if err != nil {
 		return nil, 0, err
 	}
