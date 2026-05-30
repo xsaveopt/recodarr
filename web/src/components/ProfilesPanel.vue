@@ -673,30 +673,29 @@ onMounted(load);
               </label>
             </div>
 
-            <!-- Per-channel-count bitrate table — shown only when keeping the
-                 source layout (a fixed bitrate can't sensibly apply to both
+            <!-- Per-channel-count bitrate inputs — shown only when keeping the
+                 source layout (a single bitrate can't sensibly apply to both
                  stereo and 5.1 tracks). Pre-filled with encoder-aware
                  defaults; any input the user changes is stored as an override. -->
-            <div v-if="showPerChannelBitrates" class="channel-bitrates">
-              <div class="channel-bitrates-head">
+            <div v-if="showPerChannelBitrates" class="subsection">
+              <div class="subsection-head">
                 <span class="block-title">Bitrate per channel layout (kbps)</span>
                 <span class="muted hint">
-                  Pre-filled with
-                  {{ editing.audioEncoder === "opus" ? "Opus" : "AAC" }}
-                  defaults. Change any row to override.
+                  {{ editing.audioEncoder === "opus" ? "Opus" : "AAC" }} defaults
+                  shown — change any row to override.
                 </span>
               </div>
-              <div class="channel-grid">
-                <div v-for="row in channelRows" :key="row.ch" class="channel-row">
-                  <span class="channel-label">{{ row.label }}</span>
+              <div class="fields">
+                <label v-for="row in channelRows" :key="row.ch" class="field">
+                  <span>{{ row.label }} ({{ row.ch }} ch)</span>
                   <InputNumber
                     :modelValue="audioBitrateFor(row.ch)"
-                    @update:modelValue="(v: number | null) => setAudioBitrateFor(row.ch, v)"
+                    @update:modelValue="(v) => setAudioBitrateFor(row.ch, v as number | null)"
                     :min="0"
                     :step="16"
                     :useGrouping="false"
                   />
-                </div>
+                </label>
               </div>
             </div>
 
@@ -1073,38 +1072,27 @@ onMounted(load);
   overflow-y: auto;
 }
 
-/* Per-channel-count audio bitrate table */
-.channel-bitrates {
-  margin-top: 0.75rem;
-  padding-top: 0.75rem;
+/* Audio per-channel-count bitrate subsection — sits inside the Audio block,
+   below the main 2-col fields grid. Reuses the existing .fields/.field
+   styling so the inputs match the rest of the form visually. */
+.subsection {
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
   border-top: 1px solid var(--rc-border);
 }
-.channel-bitrates-head {
+.subsection-head {
   display: flex;
   align-items: baseline;
   gap: 0.85rem;
   margin-bottom: 0.6rem;
   flex-wrap: wrap;
 }
-.channel-bitrates-head .block-title {
+.subsection-head .block-title {
   margin: 0;
+  flex-shrink: 0;
 }
-.channel-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 0.5rem 0.75rem;
-}
-.channel-row {
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-}
-.channel-label {
+.subsection-head .hint {
   flex: 1;
-  font-size: 0.82rem;
-  color: var(--rc-fg-2);
-}
-.channel-row :deep(.p-inputnumber) {
-  width: 6.5rem;
+  min-width: 14rem;
 }
 </style>
