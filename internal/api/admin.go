@@ -83,26 +83,27 @@ type qbitInstanceDTO struct {
 }
 
 type profileDTO struct {
-	ID              int64  `json:"id"`
-	Name            string `json:"name"`
-	Encoder         string `json:"encoder"`
-	EncoderPreset   string `json:"encoderPreset"`
-	EncoderProfile  string `json:"encoderProfile"`
-	EncoderTune     string `json:"encoderTune"`
-	EncoderLevel    string `json:"encoderLevel"`
-	RateControl     string `json:"rateControl"` // "crf" | "abr"
-	Quality         int    `json:"quality"`
-	VideoBitrate    int    `json:"videoBitrate"` // kbps; only used when rateControl=abr
-	MaxWidth        int    `json:"maxWidth"`
-	MaxHeight       int    `json:"maxHeight"`
-	AudioEncoder    string `json:"audioEncoder"`
-	AudioBitrate    int    `json:"audioBitrate"`
-	AudioMixdown    string `json:"audioMixdown"`
-	SubtitleCopy    bool   `json:"subtitleCopy"`
-	TwoPass         bool   `json:"twoPass"`
-	ContainerFormat string `json:"containerFormat"`
-	ExtraArgs       string `json:"extraArgs"`
-	Framerate       string `json:"framerate"`
+	ID                      int64          `json:"id"`
+	Name                    string         `json:"name"`
+	Encoder                 string         `json:"encoder"`
+	EncoderPreset           string         `json:"encoderPreset"`
+	EncoderProfile          string         `json:"encoderProfile"`
+	EncoderTune             string         `json:"encoderTune"`
+	EncoderLevel            string         `json:"encoderLevel"`
+	RateControl             string         `json:"rateControl"` // "crf" | "abr"
+	Quality                 int            `json:"quality"`
+	VideoBitrate            int            `json:"videoBitrate"` // kbps; only used when rateControl=abr
+	MaxWidth                int            `json:"maxWidth"`
+	MaxHeight               int            `json:"maxHeight"`
+	AudioEncoder            string         `json:"audioEncoder"`
+	AudioBitrate            int            `json:"audioBitrate"`
+	AudioMixdown            string         `json:"audioMixdown"`
+	AudioBitratesByChannels map[string]int `json:"audioBitratesByChannels"`
+	SubtitleCopy            bool           `json:"subtitleCopy"`
+	TwoPass                 bool           `json:"twoPass"`
+	ContainerFormat         string         `json:"containerFormat"`
+	ExtraArgs               string         `json:"extraArgs"`
+	Framerate               string         `json:"framerate"`
 	// Pre-encode filters; zero/empty = inactive.
 	SkipCodecs           string `json:"skipCodecs"`
 	SkipBitrateMBPerHour int    `json:"skipBitrateMBPerHour"` // value; unit determines interpretation
@@ -120,6 +121,12 @@ type profileDTO struct {
 }
 
 func profileRowToDTO(r store.ProfileRow) profileDTO {
+	// Decode the stored JSON; tolerate empty/invalid by returning an empty map
+	// (JSON marshals as "{}", which the SPA treats as "use defaults").
+	bitrates := map[string]int{}
+	if r.AudioBitratesByChannels != "" && r.AudioBitratesByChannels != "{}" {
+		_ = json.Unmarshal([]byte(r.AudioBitratesByChannels), &bitrates)
+	}
 	return profileDTO{
 		ID: r.ID, Name: r.Name, Encoder: r.Encoder,
 		EncoderPreset: r.EncoderPreset, EncoderProfile: r.EncoderProfile,
@@ -130,7 +137,8 @@ func profileRowToDTO(r store.ProfileRow) profileDTO {
 		MaxWidth:     r.MaxWidth, MaxHeight: r.MaxHeight,
 		AudioEncoder: r.AudioEncoder,
 		AudioBitrate: r.AudioBitrate, AudioMixdown: r.AudioMixdown,
-		SubtitleCopy: r.SubtitleCopy, TwoPass: r.TwoPass,
+		AudioBitratesByChannels: bitrates,
+		SubtitleCopy:            r.SubtitleCopy, TwoPass: r.TwoPass,
 		ContainerFormat: r.ContainerFormat, ExtraArgs: r.ExtraArgs,
 		Framerate:              r.Framerate,
 		SkipCodecs:             r.SkipCodecs,
@@ -1038,6 +1046,22 @@ func upsertProfile(st *store.Store) http.HandlerFunc {
 			http.Error(w, "bad payload", http.StatusBadRequest)
 			return
 		}
+		// Re-encode the per-channel bitrate map to a compact JSON string for
+		// storage. Nil/empty becomes "{}" (the wire-default that says "use
+		// encoder defaults"). Invalid entries (non-positive bitrates) are
+		// silently dropped — they'd resolve to defaults anyway.
+		bitratesJSON := "{}"
+		if len(d.AudioBitratesByChannels) > 0 {
+			cleaned := make(map[string]int, len(d.AudioBitratesByChannels))
+			for k, v := range d.AudioBitratesByChannels {
+				if v > 0 {
+					cleaned[k] = v
+				}
+			}
+			if b, err := json.Marshal(cleaned); err == nil {
+				bitratesJSON = string(b)
+			}
+		}
 		id, err := st.UpsertProfile(r.Context(), store.ProfileRow{
 			ID: d.ID, Name: d.Name, Encoder: d.Encoder,
 			EncoderPreset: d.EncoderPreset, EncoderProfile: d.EncoderProfile,
@@ -1048,7 +1072,8 @@ func upsertProfile(st *store.Store) http.HandlerFunc {
 			MaxWidth:     d.MaxWidth, MaxHeight: d.MaxHeight,
 			AudioEncoder: d.AudioEncoder,
 			AudioBitrate: d.AudioBitrate, AudioMixdown: d.AudioMixdown,
-			SubtitleCopy: d.SubtitleCopy, TwoPass: d.TwoPass,
+			AudioBitratesByChannels: bitratesJSON,
+			SubtitleCopy:            d.SubtitleCopy, TwoPass: d.TwoPass,
 			ContainerFormat: d.ContainerFormat, ExtraArgs: d.ExtraArgs,
 			Framerate:              d.Framerate,
 			SkipCodecs:             strings.ToLower(strings.TrimSpace(d.SkipCodecs)),

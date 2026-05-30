@@ -222,6 +222,50 @@ const mixdownModel = computed<string>({
   },
 });
 
+// Per-channel-count audio bitrate defaults — mirror internal/audio/bitrates.go.
+// AAC at ~64 kbps/channel is the widely-cited LC sweet spot; Opus at ~48 kbps/
+// channel (with 96 stereo / 256 5.1 anchored to the industry "transparent"
+// values) reflects its higher coding efficiency.
+const AUDIO_DEFAULTS_AAC: Record<number, number> = {
+  1: 64, 2: 128, 3: 192, 4: 256, 5: 320, 6: 384, 7: 448, 8: 512,
+};
+const AUDIO_DEFAULTS_OPUS: Record<number, number> = {
+  1: 48, 2: 96, 3: 144, 4: 192, 5: 224, 6: 256, 7: 320, 8: 384,
+};
+function audioDefaultsFor(encoder: string | undefined): Record<number, number> {
+  return encoder === "opus" ? AUDIO_DEFAULTS_OPUS : AUDIO_DEFAULTS_AAC;
+}
+const channelRows: { ch: number; label: string }[] = [
+  { ch: 1, label: "Mono" },
+  { ch: 2, label: "Stereo" },
+  { ch: 3, label: "2.1 / 3.0" },
+  { ch: 4, label: "Quad / 4.0" },
+  { ch: 5, label: "5.0" },
+  { ch: 6, label: "5.1" },
+  { ch: 7, label: "6.1" },
+  { ch: 8, label: "7.1" },
+];
+// Show the per-channel-count table only when we'd actually emit a per-track
+// --ab list: encoder re-encodes audio AND mixdown is "keep source layout".
+const showPerChannelBitrates = computed(() => {
+  const enc = editing.value?.audioEncoder ?? "";
+  return enc !== "" && enc !== "copy" && (editing.value?.audioMixdown ?? "") === "";
+});
+function audioBitrateFor(ch: number): number {
+  const stored = editing.value?.audioBitratesByChannels?.[String(ch)];
+  if (stored && stored > 0) return stored;
+  return audioDefaultsFor(editing.value?.audioEncoder)[ch] ?? 0;
+}
+function setAudioBitrateFor(ch: number, v: number | null | undefined) {
+  if (!editing.value) return;
+  if (!editing.value.audioBitratesByChannels) editing.value.audioBitratesByChannels = {};
+  if (v == null || v <= 0) {
+    delete editing.value.audioBitratesByChannels[String(ch)];
+  } else {
+    editing.value.audioBitratesByChannels[String(ch)] = v;
+  }
+}
+
 const rateControlOptions = [
   { value: "crf", label: "CRF (constant quality)" },
   { value: "abr", label: "ABR (average bitrate)" },
@@ -249,6 +293,7 @@ function defaultProfile(): Partial<Profile> {
     audioEncoder: "copy",
     audioBitrate: 0,
     audioMixdown: "",
+    audioBitratesByChannels: {},
     subtitleCopy: true,
     twoPass: false,
     containerFormat: "mkv",
@@ -296,6 +341,7 @@ function fillDefaults(p: Partial<Profile>): Partial<Profile> {
   // Audio: an empty audioEncoder column in the DB historically meant "copy
   // all" (passthrough). Make that explicit in the dropdown.
   if (!p.audioEncoder) p.audioEncoder = "copy";
+  if (!p.audioBitratesByChannels) p.audioBitratesByChannels = {};
   if (!p.rateControl) p.rateControl = "crf";
   if (!p.quality && p.rateControl === "crf") p.quality = defaultQualityFor(p.encoder);
   return p;
@@ -600,7 +646,7 @@ onMounted(load);
                   optionValue="value"
                 />
               </label>
-              <label class="field">
+              <label v-if="!showPerChannelBitrates" class="field">
                 <span>Bitrate (kbps)</span>
                 <InputNumber
                   v-model="editing.audioBitrate"
@@ -626,6 +672,34 @@ onMounted(load);
                 </span>
               </label>
             </div>
+
+            <!-- Per-channel-count bitrate table — shown only when keeping the
+                 source layout (a fixed bitrate can't sensibly apply to both
+                 stereo and 5.1 tracks). Pre-filled with encoder-aware
+                 defaults; any input the user changes is stored as an override. -->
+            <div v-if="showPerChannelBitrates" class="channel-bitrates">
+              <div class="channel-bitrates-head">
+                <span class="block-title">Bitrate per channel layout (kbps)</span>
+                <span class="muted hint">
+                  Pre-filled with
+                  {{ editing.audioEncoder === "opus" ? "Opus" : "AAC" }}
+                  defaults. Change any row to override.
+                </span>
+              </div>
+              <div class="channel-grid">
+                <div v-for="row in channelRows" :key="row.ch" class="channel-row">
+                  <span class="channel-label">{{ row.label }}</span>
+                  <InputNumber
+                    :modelValue="audioBitrateFor(row.ch)"
+                    @update:modelValue="(v: number | null) => setAudioBitrateFor(row.ch, v)"
+                    :min="0"
+                    :step="16"
+                    :useGrouping="false"
+                  />
+                </div>
+              </div>
+            </div>
+
             <p class="muted hint span-2">
               "Copy all (passthrough)" leaves audio tracks untouched (bitrate/mixdown ignored).
             </p>
@@ -997,5 +1071,40 @@ onMounted(load);
 :deep(.profile-dialog .p-dialog-content) {
   max-height: 80vh;
   overflow-y: auto;
+}
+
+/* Per-channel-count audio bitrate table */
+.channel-bitrates {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--rc-border);
+}
+.channel-bitrates-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.85rem;
+  margin-bottom: 0.6rem;
+  flex-wrap: wrap;
+}
+.channel-bitrates-head .block-title {
+  margin: 0;
+}
+.channel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.5rem 0.75rem;
+}
+.channel-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+.channel-label {
+  flex: 1;
+  font-size: 0.82rem;
+  color: var(--rc-fg-2);
+}
+.channel-row :deep(.p-inputnumber) {
+  width: 6.5rem;
 }
 </style>

@@ -67,27 +67,33 @@ func VersionString() string {
 
 // Settings describes an encode job in terms of HandBrakeCLI flags.
 type Settings struct {
-	Encoder         string
-	EncoderPreset   string
-	EncoderProfile  string
-	EncoderTune     string
-	EncoderLevel    string
+	Encoder        string
+	EncoderPreset  string
+	EncoderProfile string
+	EncoderTune    string
+	EncoderLevel   string
 	// RateControl picks the bitrate model: "crf" (default) for constant
 	// quality (uses Quality), or "abr" for average bitrate (uses VideoBitrate).
-	RateControl     string
-	Quality         int
-	VideoBitrate    int // kbps; only used when RateControl="abr"
-	MaxWidth        int
-	MaxHeight       int
-	AudioEncoder    string // "copy", "av_aac", "mp3", etc.; "" = HandBrake default
-	AudioBitrate    int    // kbps; 0 = auto
-	AudioMixdown    string // "stereo", "5point1", etc.; "" = keep source
-	SubtitleCopy    bool
-	TwoPass         bool
-	ContainerFormat string // mkv (default) or mp4
-	ExtraArgs       string // raw HandBrakeCLI flags appended verbatim
-	Framerate       string // e.g. "30", "24000/1001"; empty = source
-	NoCommit        bool   // when true, the encoded file is left at TempPath instead of
+	RateControl  string
+	Quality      int
+	VideoBitrate int // kbps; only used when RateControl="abr"
+	MaxWidth     int
+	MaxHeight    int
+	AudioEncoder string // "copy", "av_aac", "mp3", etc.; "" = HandBrake default
+	AudioBitrate int    // kbps; 0 = auto. Ignored when AudioBitratesPerTrack is set.
+	AudioMixdown string // "stereo", "5point1", etc.; "" = keep source
+	// AudioBitratesPerTrack, when non-empty, sets a different bitrate per
+	// output track (one entry per input audio stream, in order). Used by the
+	// worker when AudioMixdown is empty so each track is re-encoded at a
+	// bitrate appropriate to its channel count. Passed to HandBrake as a
+	// comma-separated --ab list. Overrides AudioBitrate when set.
+	AudioBitratesPerTrack []int
+	SubtitleCopy          bool
+	TwoPass               bool
+	ContainerFormat       string // mkv (default) or mp4
+	ExtraArgs             string // raw HandBrakeCLI flags appended verbatim
+	Framerate             string // e.g. "30", "24000/1001"; empty = source
+	NoCommit              bool   // when true, the encoded file is left at TempPath instead of
 	// being renamed over the input. Callers use Commit or DiscardTemp to finalize. Used by
 	// the worker's size-guard policies, which want to compare new vs. original before
 	// destroying the source.
@@ -354,8 +360,19 @@ func buildArgs(input, output string, s Settings) []string {
 	}
 	if s.AudioEncoder != "" {
 		args = append(args, "--all-audio", "--aencoder", s.AudioEncoder)
-		if s.AudioEncoder != "copy" && s.AudioBitrate > 0 {
-			args = append(args, "--ab", strconv.Itoa(s.AudioBitrate))
+		if s.AudioEncoder != "copy" {
+			// Per-track wins: keep-source-layout mode hands us a bitrate per
+			// input audio stream so 5.1 doesn't get starved at the same value
+			// as stereo. Falls back to a flat --ab otherwise.
+			if len(s.AudioBitratesPerTrack) > 0 {
+				parts := make([]string, len(s.AudioBitratesPerTrack))
+				for i, b := range s.AudioBitratesPerTrack {
+					parts[i] = strconv.Itoa(b)
+				}
+				args = append(args, "--ab", strings.Join(parts, ","))
+			} else if s.AudioBitrate > 0 {
+				args = append(args, "--ab", strconv.Itoa(s.AudioBitrate))
+			}
 		}
 		if s.AudioMixdown != "" {
 			args = append(args, "--mixdown", s.AudioMixdown)

@@ -57,6 +57,11 @@ type ProfileRow struct {
 	AudioEncoder    string
 	AudioBitrate    int
 	AudioMixdown    string
+	// AudioBitratesByChannels is a JSON map of channel-count → kbps used when
+	// AudioMixdown is empty (keep source layout). Each output audio track is
+	// re-encoded at the bitrate matching its source channel count. Empty/missing
+	// "{}" means "use encoder-aware defaults" (see internal/audiomix).
+	AudioBitratesByChannels string
 	// Pre-encode filters; zero/empty = filter inactive.
 	SkipCodecs           string // comma-separated, lowercase, e.g. "av1,hevc"
 	SkipBitrateMBPerHour int
@@ -349,12 +354,12 @@ func (s *Store) DeleteQbitInstance(ctx context.Context, id int64) error {
 
 // --- profiles ---
 
-const profileCols = `id,name,encoder,encoder_preset,encoder_profile,encoder_tune,encoder_level,rate_control,quality,video_bitrate,max_width,max_height,subtitle_copy,two_pass,container_format,extra_args,framerate,audio_encoder,audio_bitrate,audio_mixdown,skip_codecs,skip_bitrate_mb_per_hour,skip_bitrate_unit,skip_file_size_mb,skip_duration_minutes,skip_height_px,skip_hdr,bloat_policy,bloat_retry_max,bloat_retry_step,bloat_min_savings_percent,deleted_at`
+const profileCols = `id,name,encoder,encoder_preset,encoder_profile,encoder_tune,encoder_level,rate_control,quality,video_bitrate,max_width,max_height,subtitle_copy,two_pass,container_format,extra_args,framerate,audio_encoder,audio_bitrate,audio_mixdown,audio_bitrates_by_channels,skip_codecs,skip_bitrate_mb_per_hour,skip_bitrate_unit,skip_file_size_mb,skip_duration_minutes,skip_height_px,skip_hdr,bloat_policy,bloat_retry_max,bloat_retry_step,bloat_min_savings_percent,deleted_at`
 
 func scanProfile(scan func(...any) error) (ProfileRow, error) {
 	var r ProfileRow
 	var subtitleCopy, twoPass, skipHDR int
-	err := scan(&r.ID, &r.Name, &r.Encoder, &r.EncoderPreset, &r.EncoderProfile, &r.EncoderTune, &r.EncoderLevel, &r.RateControl, &r.Quality, &r.VideoBitrate, &r.MaxWidth, &r.MaxHeight, &subtitleCopy, &twoPass, &r.ContainerFormat, &r.ExtraArgs, &r.Framerate, &r.AudioEncoder, &r.AudioBitrate, &r.AudioMixdown,
+	err := scan(&r.ID, &r.Name, &r.Encoder, &r.EncoderPreset, &r.EncoderProfile, &r.EncoderTune, &r.EncoderLevel, &r.RateControl, &r.Quality, &r.VideoBitrate, &r.MaxWidth, &r.MaxHeight, &subtitleCopy, &twoPass, &r.ContainerFormat, &r.ExtraArgs, &r.Framerate, &r.AudioEncoder, &r.AudioBitrate, &r.AudioMixdown, &r.AudioBitratesByChannels,
 		&r.SkipCodecs, &r.SkipBitrateMBPerHour, &r.SkipBitrateUnit, &r.SkipFileSizeMB, &r.SkipDurationMinutes, &r.SkipHeightPx, &skipHDR,
 		&r.BloatPolicy, &r.BloatRetryMax, &r.BloatRetryStep, &r.BloatMinSavingsPercent, &r.DeletedAt)
 	r.SubtitleCopy = subtitleCopy != 0
@@ -416,11 +421,14 @@ func (s *Store) UpsertProfile(ctx context.Context, r ProfileRow) (int64, error) 
 	if r.SkipBitrateUnit != "kbps" {
 		r.SkipBitrateUnit = "mb_per_hour"
 	}
+	if r.AudioBitratesByChannels == "" {
+		r.AudioBitratesByChannels = "{}"
+	}
 	if r.ID == 0 {
 		res, err := s.DB.ExecContext(ctx,
-			`INSERT INTO profiles (name,encoder,encoder_preset,encoder_profile,encoder_tune,encoder_level,rate_control,quality,video_bitrate,max_width,max_height,subtitle_copy,two_pass,container_format,extra_args,framerate,audio_encoder,audio_bitrate,audio_mixdown,skip_codecs,skip_bitrate_mb_per_hour,skip_bitrate_unit,skip_file_size_mb,skip_duration_minutes,skip_height_px,skip_hdr,bloat_policy,bloat_retry_max,bloat_retry_step,bloat_min_savings_percent)
-			 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			r.Name, r.Encoder, r.EncoderPreset, r.EncoderProfile, r.EncoderTune, r.EncoderLevel, r.RateControl, r.Quality, r.VideoBitrate, r.MaxWidth, r.MaxHeight, boolToInt(r.SubtitleCopy), boolToInt(r.TwoPass), r.ContainerFormat, r.ExtraArgs, r.Framerate, r.AudioEncoder, r.AudioBitrate, r.AudioMixdown,
+			`INSERT INTO profiles (name,encoder,encoder_preset,encoder_profile,encoder_tune,encoder_level,rate_control,quality,video_bitrate,max_width,max_height,subtitle_copy,two_pass,container_format,extra_args,framerate,audio_encoder,audio_bitrate,audio_mixdown,audio_bitrates_by_channels,skip_codecs,skip_bitrate_mb_per_hour,skip_bitrate_unit,skip_file_size_mb,skip_duration_minutes,skip_height_px,skip_hdr,bloat_policy,bloat_retry_max,bloat_retry_step,bloat_min_savings_percent)
+			 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			r.Name, r.Encoder, r.EncoderPreset, r.EncoderProfile, r.EncoderTune, r.EncoderLevel, r.RateControl, r.Quality, r.VideoBitrate, r.MaxWidth, r.MaxHeight, boolToInt(r.SubtitleCopy), boolToInt(r.TwoPass), r.ContainerFormat, r.ExtraArgs, r.Framerate, r.AudioEncoder, r.AudioBitrate, r.AudioMixdown, r.AudioBitratesByChannels,
 			r.SkipCodecs, r.SkipBitrateMBPerHour, r.SkipBitrateUnit, r.SkipFileSizeMB, r.SkipDurationMinutes, r.SkipHeightPx, boolToInt(r.SkipHDR),
 			r.BloatPolicy, r.BloatRetryMax, r.BloatRetryStep, r.BloatMinSavingsPercent)
 		if err != nil {
@@ -429,10 +437,10 @@ func (s *Store) UpsertProfile(ctx context.Context, r ProfileRow) (int64, error) 
 		return res.LastInsertId()
 	}
 	_, err := s.DB.ExecContext(ctx,
-		`UPDATE profiles SET name=?,encoder=?,encoder_preset=?,encoder_profile=?,encoder_tune=?,encoder_level=?,rate_control=?,quality=?,video_bitrate=?,max_width=?,max_height=?,subtitle_copy=?,two_pass=?,container_format=?,extra_args=?,framerate=?,audio_encoder=?,audio_bitrate=?,audio_mixdown=?,
+		`UPDATE profiles SET name=?,encoder=?,encoder_preset=?,encoder_profile=?,encoder_tune=?,encoder_level=?,rate_control=?,quality=?,video_bitrate=?,max_width=?,max_height=?,subtitle_copy=?,two_pass=?,container_format=?,extra_args=?,framerate=?,audio_encoder=?,audio_bitrate=?,audio_mixdown=?,audio_bitrates_by_channels=?,
 		 skip_codecs=?,skip_bitrate_mb_per_hour=?,skip_bitrate_unit=?,skip_file_size_mb=?,skip_duration_minutes=?,skip_height_px=?,skip_hdr=?,
 		 bloat_policy=?,bloat_retry_max=?,bloat_retry_step=?,bloat_min_savings_percent=? WHERE id=?`,
-		r.Name, r.Encoder, r.EncoderPreset, r.EncoderProfile, r.EncoderTune, r.EncoderLevel, r.RateControl, r.Quality, r.VideoBitrate, r.MaxWidth, r.MaxHeight, boolToInt(r.SubtitleCopy), boolToInt(r.TwoPass), r.ContainerFormat, r.ExtraArgs, r.Framerate, r.AudioEncoder, r.AudioBitrate, r.AudioMixdown,
+		r.Name, r.Encoder, r.EncoderPreset, r.EncoderProfile, r.EncoderTune, r.EncoderLevel, r.RateControl, r.Quality, r.VideoBitrate, r.MaxWidth, r.MaxHeight, boolToInt(r.SubtitleCopy), boolToInt(r.TwoPass), r.ContainerFormat, r.ExtraArgs, r.Framerate, r.AudioEncoder, r.AudioBitrate, r.AudioMixdown, r.AudioBitratesByChannels,
 		r.SkipCodecs, r.SkipBitrateMBPerHour, r.SkipBitrateUnit, r.SkipFileSizeMB, r.SkipDurationMinutes, r.SkipHeightPx, boolToInt(r.SkipHDR),
 		r.BloatPolicy, r.BloatRetryMax, r.BloatRetryStep, r.BloatMinSavingsPercent, r.ID)
 	return r.ID, err

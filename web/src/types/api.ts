@@ -38,6 +38,10 @@ export interface Profile {
   audioEncoder: string;
   audioBitrate: number;
   audioMixdown: string;
+  // Per-channel-count kbps used when audioMixdown is empty (keep source layout).
+  // Keys are stringified channel counts (e.g. "2", "6"). Missing/empty falls
+  // back to encoder-aware defaults.
+  audioBitratesByChannels: Record<string, number>;
   subtitleCopy: boolean;
   twoPass: boolean;
   containerFormat: string;

@@ -18,8 +18,10 @@ import (
 	"time"
 
 	"github.com/sratabix/recodarr/internal/arr"
+	"github.com/sratabix/recodarr/internal/audio"
 	"github.com/sratabix/recodarr/internal/handbrake"
 	"github.com/sratabix/recodarr/internal/notify"
+	"github.com/sratabix/recodarr/internal/probe"
 	"github.com/sratabix/recodarr/internal/qbit"
 	"github.com/sratabix/recodarr/internal/store"
 )
@@ -722,6 +724,23 @@ func (w *Worker) encodeOne(encCtx, parentCtx context.Context, j store.JobRow) {
 			}
 		}
 	}
+	// Per-track audio bitrates: only needed when re-encoding audio and keeping
+	// the source channel layout — otherwise a flat AudioBitrate is fine. Probing
+	// the source for channel counts is best-effort; if it fails (ffprobe missing
+	// or file unreadable), we fall through to the flat bitrate so the encode
+	// still proceeds.
+	var perTrackAudioBitrates []int
+	if profile.AudioEncoder != "" && profile.AudioEncoder != "copy" && profile.AudioMixdown == "" {
+		pr, err := probe.Run(parentCtx, j.FilePath)
+		if err != nil {
+			slog.Warn("audio probe for per-track bitrates failed; falling back to flat AudioBitrate",
+				"id", j.ID, "path", j.FilePath, "err", err)
+		} else if len(pr.AudioChannels) > 0 {
+			perTrackAudioBitrates = audio.ResolveBitrates(profile.AudioBitratesByChannels, profile.AudioEncoder, pr.AudioChannels)
+			slog.Debug("resolved per-track audio bitrates", "id", j.ID, "channels", pr.AudioChannels, "kbps", perTrackAudioBitrates)
+		}
+	}
+
 	combinedLog := strings.Builder{}
 	attempt := 0
 
@@ -739,25 +758,26 @@ func (w *Worker) encodeOne(encCtx, parentCtx context.Context, j store.JobRow) {
 			}
 		}
 		settings := handbrake.Settings{
-			Encoder:         profile.Encoder,
-			EncoderPreset:   profile.EncoderPreset,
-			EncoderProfile:  profile.EncoderProfile,
-			EncoderTune:     profile.EncoderTune,
-			EncoderLevel:    profile.EncoderLevel,
-			RateControl:     profile.RateControl,
-			Quality:         currentQuality,
-			VideoBitrate:    currentBitrate,
-			MaxWidth:        profile.MaxWidth,
-			MaxHeight:       profile.MaxHeight,
-			AudioEncoder:    profile.AudioEncoder,
-			AudioBitrate:    profile.AudioBitrate,
-			AudioMixdown:    profile.AudioMixdown,
-			SubtitleCopy:    profile.SubtitleCopy,
-			TwoPass:         profile.TwoPass,
-			ContainerFormat: profile.ContainerFormat,
-			ExtraArgs:       profile.ExtraArgs,
-			Framerate:       profile.Framerate,
-			NoCommit:        noCommit,
+			Encoder:               profile.Encoder,
+			EncoderPreset:         profile.EncoderPreset,
+			EncoderProfile:        profile.EncoderProfile,
+			EncoderTune:           profile.EncoderTune,
+			EncoderLevel:          profile.EncoderLevel,
+			RateControl:           profile.RateControl,
+			Quality:               currentQuality,
+			VideoBitrate:          currentBitrate,
+			MaxWidth:              profile.MaxWidth,
+			MaxHeight:             profile.MaxHeight,
+			AudioEncoder:          profile.AudioEncoder,
+			AudioBitrate:          profile.AudioBitrate,
+			AudioMixdown:          profile.AudioMixdown,
+			AudioBitratesPerTrack: perTrackAudioBitrates,
+			SubtitleCopy:          profile.SubtitleCopy,
+			TwoPass:               profile.TwoPass,
+			ContainerFormat:       profile.ContainerFormat,
+			ExtraArgs:             profile.ExtraArgs,
+			Framerate:             profile.Framerate,
+			NoCommit:              noCommit,
 		}
 		// Branch local vs. remote. The remote agent always returns the
 		// encoded bytes in a sibling temp file (mirroring NoCommit=true), so

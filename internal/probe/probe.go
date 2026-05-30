@@ -32,6 +32,11 @@ type Probe struct {
 	BitrateBps    int64
 	IsHDR         bool   // true if color_transfer is PQ (smpte2084) or HLG (arib-std-b67)
 	ColorTransfer string // raw value for diagnostics
+	// AudioChannels lists the channel count of each audio stream in the order
+	// ffprobe reports them — which is also the order HandBrake numbers tracks
+	// for --ab/--mixdown lists. 0 means the channel count couldn't be parsed
+	// for that stream.
+	AudioChannels []int
 }
 
 // MBPerHour returns bitrate expressed as megabytes per hour. Used by the
@@ -60,6 +65,7 @@ type ffprobeOutput struct {
 		Height        int    `json:"height"`
 		ColorTransfer string `json:"color_transfer"`
 		BitRate       string `json:"bit_rate"`
+		Channels      int    `json:"channels"`
 	} `json:"streams"`
 }
 
@@ -102,13 +108,19 @@ func Run(ctx context.Context, path string) (Probe, error) {
 		p.BitrateBps = int64(float64(size) * 8 / p.DurationSec)
 	}
 
+	gotVideo := false
 	for _, s := range raw.Streams {
-		if s.CodecType != "video" {
+		if s.CodecType == "audio" {
+			p.AudioChannels = append(p.AudioChannels, s.Channels)
+			continue
+		}
+		if s.CodecType != "video" || gotVideo {
 			continue
 		}
 		// First video stream wins. Modern files almost never have multiple
 		// video tracks, and when they do (multi-angle Blu-rays), the first
-		// is always the canonical one.
+		// is always the canonical one. Keep iterating so audio streams after
+		// the video (the typical container layout) still get collected.
 		p.Codec = strings.ToLower(s.CodecName)
 		p.Width = s.Width
 		p.Height = s.Height
@@ -125,7 +137,7 @@ func Run(ctx context.Context, path string) (Probe, error) {
 				p.BitrateBps = b
 			}
 		}
-		break
+		gotVideo = true
 	}
 	return p, nil
 }
