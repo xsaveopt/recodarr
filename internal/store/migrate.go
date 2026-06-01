@@ -14,16 +14,6 @@ var migrationsFS embed.FS
 
 const migrationsDir = "migrations"
 
-// migrate brings the database schema up to date.
-//
-// Schema is managed by goose with embedded .sql files in migrations/. For new
-// installs goose creates everything from 001_init.sql. For databases that
-// pre-date the migration system, adoptLegacyDB reconciles any missing columns
-// added since their initial CREATE TABLE and stamps the DB at version 1 so
-// goose takes over cleanly from there.
-//
-// To add a schema change: drop a new migrations/NNN_<slug>.sql file with
-// +goose Up / +goose Down blocks. Numbering must be strictly increasing.
 func (s *Store) migrate() error {
 	goose.SetBaseFS(migrationsFS)
 	goose.SetLogger(gooseLogger{})
@@ -41,11 +31,6 @@ func (s *Store) migrate() error {
 	return nil
 }
 
-// adoptLegacyDB handles databases created before goose was introduced. If our
-// tables exist but goose's version table does not, we reconcile any missing
-// columns (the columns added between the original schema and migration v1)
-// and then stamp the DB at version 1 so goose.Up becomes a no-op for v1 and
-// future migrations apply normally.
 func (s *Store) adoptLegacyDB() error {
 	hasGoose, err := s.tableExists("goose_db_version")
 	if err != nil {
@@ -59,7 +44,6 @@ func (s *Store) adoptLegacyDB() error {
 		return err
 	}
 	if !hasLegacy {
-		// Fresh install — let goose.Up build everything.
 		return nil
 	}
 
@@ -67,8 +51,7 @@ func (s *Store) adoptLegacyDB() error {
 	if err := s.addMissingColumns(); err != nil {
 		return err
 	}
-	// Create the goose version table and mark v1 applied. goose creates this
-	// table on first Up; we pre-create it so we can insert a stamp row.
+
 	if _, err := s.DB.Exec(`CREATE TABLE IF NOT EXISTS goose_db_version (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		version_id INTEGER NOT NULL,
@@ -83,12 +66,6 @@ func (s *Store) adoptLegacyDB() error {
 	return nil
 }
 
-// addMissingColumns reconciles legacy databases to the v1 schema. It exists
-// only for adopting installs that pre-date goose; once a DB is stamped, all
-// schema evolution happens via migration files.
-//
-// Only additive: never drops or renames. Type/default must match
-// migrations/001_init.sql.
 func (s *Store) addMissingColumns() error {
 	type col struct{ name, ddl string }
 	tables := map[string][]col{
@@ -186,19 +163,13 @@ func (s *Store) tableColumns(table string) (map[string]struct{}, error) {
 	return out, rows.Err()
 }
 
-// gooseLogger routes goose's chatty output through slog so it lands in the
-// app log alongside everything else.
 type gooseLogger struct{}
 
 func (gooseLogger) Fatalf(format string, v ...interface{}) {
 	slog.Error("goose: " + fmt.Sprintf(format, v...))
 }
 func (gooseLogger) Printf(format string, v ...interface{}) {
-	// Goose's Printf fires for every applied migration and the
-	// "current version: N" message. Useful when something goes wrong, not
-	// useful in the operator's docker logs on every boot.
 	slog.Debug("goose: " + fmt.Sprintf(format, v...))
 }
 
-// Compile-time check that gooseLogger satisfies goose.Logger.
 var _ goose.Logger = gooseLogger{}

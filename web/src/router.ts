@@ -26,14 +26,12 @@ export const router = createRouter({
   routes,
 });
 
-// Auth guard: hits /api/auth/status on every navigation. Cheap (single SQLite COUNT +
-// session lookup), and avoids stale client-side auth state.
 router.beforeEach(async (to) => {
   let status;
   try {
     status = await api.auth.status();
   } catch {
-    return true; // network blip — let the page render so the failure is visible
+    return true;
   }
   if (!status.setup) {
     return to.name === "setup" ? true : { name: "setup" };

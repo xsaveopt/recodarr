@@ -8,19 +8,6 @@ export interface EncodeProgress {
   eta: string;
 }
 
-/**
- * Subscribes to /api/worker/progress (SSE) for live encode progress across N
- * concurrent encodes. Holds one entry per in-flight job, keyed by jobId.
- *
- * Reconnects with exponential backoff (2s, 4s, 8s, …) capped at 30s, so a long
- * backend outage doesn't translate into a request storm. Successful open resets
- * the delay.
- *
- * Pruning: the SSE stream emits a final event with percent=0 when an encode
- * finishes (the worker fires it from the goroutine's defer), which removes the
- * job from the map. Callers that poll /api/worker/status can also call prune()
- * with the authoritative active set to clean up if SSE missed an event.
- */
 export function useEncodeProgress(opts?: { onComplete?: (jobId: number) => void }) {
   const progressByJob = ref<Record<number, EncodeProgress>>({});
   const connected = ref(false);
@@ -35,18 +22,11 @@ export function useEncodeProgress(opts?: { onComplete?: (jobId: number) => void 
 
   function applyEvent(ev: EncodeProgress) {
     if (!ev.jobId) return;
-    // Worker's defer fires a final {jobId, title, 0, 0, ""} when an encode
-    // exits — remove the job from the map. A genuine "just started" event also
-    // has percent=0 but typically arrives within a tick of follow-up progress,
-    // so worst case we briefly drop and re-add a row. Acceptable.
     if (ev.percent === 0 && ev.fps === 0 && !ev.eta) {
       const had = progressByJob.value[ev.jobId] != null;
       const next = { ...progressByJob.value };
       delete next[ev.jobId];
       progressByJob.value = next;
-      // Only fire onComplete if we actually had a tracked encode for this job;
-      // ignore the spurious zero events that arrive before the first progress
-      // tick on a brand-new encode.
       if (had) opts?.onComplete?.(ev.jobId);
       return;
     }
@@ -75,13 +55,12 @@ export function useEncodeProgress(opts?: { onComplete?: (jobId: number) => void 
     es = new EventSource("/api/worker/progress");
     es.addEventListener("open", () => {
       connected.value = true;
-      nextDelay = minDelay; // reset backoff on successful connect
+      nextDelay = minDelay;
     });
     es.addEventListener("progress", (ev) => {
       try {
         applyEvent(JSON.parse((ev as MessageEvent).data));
       } catch {
-        /* ignore malformed */
       }
     });
     es.addEventListener("idle", () => {

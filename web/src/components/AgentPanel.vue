@@ -31,8 +31,6 @@ async function load() {
     serverMaxParallel.value = parseInt(s.max_parallel_encodes ?? "1") || 1;
   }
   if (enabled.value && url.value) {
-    // Best-effort probe so the panel can show actual agent capacity without
-    // the user clicking Test first.
     try {
       const r = await api.agent.test({ url: url.value, token: "" });
       if (r.ok) {
@@ -40,7 +38,6 @@ async function load() {
         agentActive.value = r.active ?? null;
       }
     } catch {
-      /* ignore — Test button still works */
     }
   }
 }

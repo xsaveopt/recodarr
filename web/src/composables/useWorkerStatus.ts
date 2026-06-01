@@ -3,14 +3,6 @@ import { onMounted, onUnmounted, ref } from "vue";
 import { api } from "@/api/client";
 import type { WorkerStatus } from "@/types/api";
 
-// Singleton worker-status poller. Multiple components subscribe via
-// useWorkerStatus(); polling starts when the first one mounts and stops when
-// the last one unmounts. Polling is also paused while the tab is hidden so
-// background tabs don't churn the API.
-//
-// Anything that mutates worker state (pause/resume, window changes) should
-// call refresh() so subscribers don't wait for the next tick.
-
 const POLL_MS = 10000;
 
 const status = ref<WorkerStatus | null>(null);
@@ -25,7 +17,6 @@ async function refresh(): Promise<void> {
     try {
       status.value = await api.worker.status();
     } catch {
-      // Background poll — stay quiet, the next tick will retry.
     } finally {
       inFlight = null;
     }

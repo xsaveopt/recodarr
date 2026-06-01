@@ -18,21 +18,12 @@ import (
 	"github.com/sratabix/recodarr/internal/handbrake"
 )
 
-// Client speaks the agent protocol on behalf of the Recodarr server. One
-// Client per configured remote agent. Safe for concurrent use; the underlying
-// http.Client manages connection reuse.
 type Client struct {
 	baseURL string
 	token   string
 	http    *http.Client
 }
 
-// NewClient constructs a Client. baseURL is the agent's base address
-// (e.g. "http://gpu-box:8090") — no trailing slash. token is the shared
-// bearer secret configured on the agent.
-//
-// The http.Client carries no overall timeout: encodes legitimately take
-// hours. Per-request bounds live inside individual operations.
 func NewClient(baseURL, token string) *Client {
 	return &Client{
 		baseURL: strings.TrimRight(baseURL, "/"),
@@ -41,8 +32,6 @@ func NewClient(baseURL, token string) *Client {
 	}
 }
 
-// Ping returns the agent's /healthz snapshot, or an error if the agent is
-// unreachable / mis-configured. Used by the health checker.
 func (c *Client) Ping(ctx context.Context) (*HealthSnapshot, error) {
 	req, err := c.newRequest(ctx, http.MethodGet, "/healthz", nil)
 	if err != nil {
@@ -63,14 +52,6 @@ func (c *Client) Ping(ctx context.Context) (*HealthSnapshot, error) {
 	return &hs, nil
 }
 
-// Encode performs a remote encode: uploads sourcePath, watches progress over
-// SSE (forwarding to onProgress), downloads the result to a sibling temp
-// file, and returns a handbrake.RunResult shaped identically to what the
-// local encoder produces. The caller commits the temp file via
-// handbrake.Commit the same way it does for local encodes.
-//
-// On any failure mid-flight the partial agent-side job is best-effort
-// deleted so the agent's disk doesn't fill up.
 func (c *Client) Encode(
 	ctx context.Context,
 	sourcePath string,
@@ -92,9 +73,7 @@ func (c *Client) Encode(
 	if err != nil {
 		return handbrake.RunResult{}, fmt.Errorf("agent create job: %w", err)
 	}
-	// Defer cleanup, but skip it on success — Recodarr's worker DELETEs the
-	// job explicitly after the local commit succeeds so the agent disk frees
-	// in the steady state.
+
 	cleanup := true
 	defer func() {
 		if !cleanup {
@@ -110,9 +89,6 @@ func (c *Client) Encode(
 	}
 
 	if err := c.watchUntilDone(ctx, created.JobID, onProgress); err != nil {
-		// Pull the HandBrake log before the deferred cleanup wipes the job
-		// dir, so the failure surfaces with real encoder output in Recodarr's
-		// failed-job UI (otherwise the user only sees "exit status N").
 		logCtx, logCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		log, _ := c.fetchLog(logCtx, created.JobID)
 		logCancel()
@@ -126,8 +102,6 @@ func (c *Client) Encode(
 		return handbrake.RunResult{}, fmt.Errorf("agent download: %w", err)
 	}
 
-	// Best-effort fetch the encode log so the standard failure-path UI (which
-	// shows handbrake stdout/stderr) works for remote encodes too.
 	log, _ := c.fetchLog(ctx, created.JobID)
 
 	cleanup = false
@@ -138,8 +112,6 @@ func (c *Client) Encode(
 	return handbrake.RunResult{FinalSize: size, TempPath: tempPath, Log: log}, nil
 }
 
-// Delete asks the agent to drop a job and its on-disk artifacts. Safe to
-// call on an unknown id (the agent responds 204 either way).
 func (c *Client) Delete(ctx context.Context, id string) error {
 	req, err := c.newRequest(ctx, http.MethodDelete, "/jobs/"+id, nil)
 	if err != nil {
@@ -181,9 +153,6 @@ func (c *Client) createJob(ctx context.Context, body JobRequest) (*JobCreateResp
 	return &cr, nil
 }
 
-// uploadSource streams sourcePath to the agent via PUT. uploadPath is the
-// path component returned by createJob (e.g. "/v1/jobs/<id>/source"); we
-// strip the protocol prefix if the agent embedded it.
 func (c *Client) uploadSource(ctx context.Context, uploadPath, sourcePath string, size int64) error {
 	f, err := os.Open(sourcePath)
 	if err != nil {
@@ -191,8 +160,6 @@ func (c *Client) uploadSource(ctx context.Context, uploadPath, sourcePath string
 	}
 	defer func() { _ = f.Close() }()
 
-	// uploadPath comes back with PathPrefix already in it (/v1/jobs/…); but
-	// newRequest also prepends PathPrefix. Strip to keep the join clean.
 	path := strings.TrimPrefix(uploadPath, PathPrefix)
 	req, err := c.newRequest(ctx, http.MethodPut, path, f)
 	if err != nil {
@@ -211,9 +178,6 @@ func (c *Client) uploadSource(ctx context.Context, uploadPath, sourcePath string
 	return nil
 }
 
-// watchUntilDone opens the SSE event stream and forwards progress to
-// onProgress until the job reaches a terminal state. Returns nil on
-// StateDone, an error describing the failure on StateFailed / StateCancelled.
 func (c *Client) watchUntilDone(ctx context.Context, id string, onProgress func(handbrake.Progress)) error {
 	req, err := c.newRequest(ctx, http.MethodGet, "/jobs/"+id+"/events", nil)
 	if err != nil {
@@ -236,7 +200,7 @@ func (c *Client) watchUntilDone(ctx context.Context, id string, onProgress func(
 		line := scanner.Text()
 		switch {
 		case line == "":
-			// Frame terminator: dispatch what we accumulated.
+
 			if event != "" {
 				c.handleEvent(event, data, onProgress)
 				if event == EventState {
@@ -263,8 +227,7 @@ func (c *Client) watchUntilDone(ctx context.Context, id string, onProgress func(
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("sse stream: %w", err)
 	}
-	// Stream closed without a terminal state: fall back to a single poll
-	// so we don't report success on a connection drop.
+
 	js, err := c.poll(ctx, id)
 	if err != nil {
 		return fmt.Errorf("sse closed; poll fallback: %w", err)
@@ -275,9 +238,6 @@ func (c *Client) watchUntilDone(ctx context.Context, id string, onProgress func(
 	return fmt.Errorf("remote ended in state %s: %s", js.State, js.Error)
 }
 
-// handleEvent forwards a progress payload to onProgress. Bad JSON and
-// non-progress events are silently ignored — progress is best-effort and
-// state transitions are handled in the watch loop.
 func (c *Client) handleEvent(event, data string, onProgress func(handbrake.Progress)) {
 	if event != EventProgress {
 		return
@@ -376,9 +336,6 @@ func readErr(r io.Reader) string {
 	return strings.TrimSpace(string(b))
 }
 
-// localTempPath replicates the convention handbrake.Run uses for its sibling
-// temp file so encodeOne's existing handbrake.Commit call at job.go works
-// unchanged for remote encodes.
 func localTempPath(input string, s handbrake.Settings) string {
 	dir := filepath.Dir(input)
 	base := filepath.Base(input)
@@ -389,8 +346,6 @@ func localTempPath(input string, s handbrake.Settings) string {
 	return filepath.Join(dir, "."+base+".recodarr.tmp"+ext)
 }
 
-// containerFor reports the output container the agent should ask HandBrake
-// for, mirroring the same logic Run uses for the temp file's extension.
 func containerFor(sourcePath string, s handbrake.Settings) string {
 	if s.ContainerFormat == "mp4" {
 		return "mp4"
@@ -398,8 +353,7 @@ func containerFor(sourcePath string, s handbrake.Settings) string {
 	if s.ContainerFormat == "mkv" {
 		return "mkv"
 	}
-	// Mirror the local encoder's behavior: keep the source container when
-	// unset, defaulting to mkv if the source has no recognized extension.
+
 	switch strings.ToLower(filepath.Ext(sourcePath)) {
 	case ".mp4", ".m4v":
 		return "mp4"
@@ -408,10 +362,5 @@ func containerFor(sourcePath string, s handbrake.Settings) string {
 	}
 }
 
-// (Note: the agent runner currently ignores Settings.ContainerFormat='' and
-// produces output based on its own logic. Keep containerFor here as the
-// authoritative source for the wire request so additions don't drift.)
-
-// silence unused-imports lint if any helpers above get refactored away.
 var _ = slog.Info
 var _ = errors.New

@@ -47,10 +47,6 @@ const levelOptions = computed(() => {
   return ec?.levels?.map((l) => ({ value: l, label: l })) ?? [];
 });
 
-// Encoder family — drives field visibility. Hardware encoders (NVENC/QSV/VCE/VAAPI)
-// have a very different config surface than software ones (x264/x265/SVT-AV1):
-// no real tunes, no real two-pass, sometimes no profile string. Hiding the
-// fields prevents footguns like "profile=main" on av1_nvenc which errors out.
 const hwPrefixes = ["nvenc_", "qsv_", "vce_", "vaapi_", "mf_", "videotoolbox_"];
 function isHardware(enc: string | undefined): boolean {
   if (!enc) return false;
@@ -63,13 +59,6 @@ function isAV1Hardware(enc: string | undefined): boolean {
 const isHwEncoder = computed(() => isHardware(editing.value?.encoder));
 const isAv1Hw = computed(() => isAV1Hardware(editing.value?.encoder));
 
-// Per-encoder sensible defaults. HandBrake CLI's documented defaults vary; these
-// are what works well for general media re-encoding (1080p, mixed sources).
-// Encoder-specific defaults, lifted from HandBrake's preset_builtin.json so
-// new profiles match what HandBrake itself ships. The keys are the canonical
-// per-encoder picks; capsFallback() then snaps each to what HandBrakeCLI
-// actually reports for the current build (handles cases where, say, the
-// "medium" preset name varies, or the encoder is missing entirely).
 const encoderQualityDefaults: Record<string, number> = {
   x264: 22,
   x264_10bit: 22,
@@ -95,9 +84,6 @@ function defaultQualityFor(enc: string | undefined): number {
   return encoderQualityDefaults[enc] ?? 22;
 }
 
-// Preset / profile / tune defaults — names that HandBrake's built-in presets
-// use. Looked up against the encoder's capabilities at apply-time so we never
-// set a value the encoder doesn't actually advertise.
 const encoderDefaults: Record<string, { preset?: string; profile?: string; tune?: string; level?: string }> = {
   x264:            { preset: "medium",    profile: "main",   level: "auto", tune: "" },
   x264_10bit:      { preset: "medium",    profile: "high10", level: "auto", tune: "" },
@@ -123,14 +109,10 @@ const encoderDefaults: Record<string, { preset?: string; profile?: string; tune?
 
 function pickIfAvailable(value: string | undefined, available: string[] | undefined): string {
   if (value === undefined || value === "") return "";
-  if (!available || available.length === 0) return value; // caps unknown — trust it
+  if (!available || available.length === 0) return value;
   return available.includes(value) ? value : "";
 }
 
-// When the user flips to ABR mode on a profile that's never had a bitrate
-// set, seed a sensible default so the save doesn't silently fall back to CRF
-// (the backend now errors on ABR + bitrate=0, but the toggle is the obvious
-// spot to fix this proactively).
 watch(
   () => editing.value?.rateControl,
   (mode) => {
@@ -141,30 +123,18 @@ watch(
   },
 );
 
-// Reset encoder-specific fields ONLY when the user changes encoder mid-edit. The initial
-// transition undefined → <encoder name> happens when opening an existing profile, and
-// must NOT wipe the saved preset/tune/profile/level values.
 watch(
   () => editing.value?.encoder,
   (newEnc, oldEnc) => {
     if (!editing.value) return;
     if (oldEnc === undefined || newEnc === oldEnc) return;
-    // Seed encoder-specific fields with the values HandBrake itself ships
-    // for that encoder in its built-in presets. If HandBrake's caps report
-    // a different vocabulary (some builds omit options), fall back to empty
-    // so the user is shown a clean choice rather than an invalid one.
     const ec = capsForEncoder(newEnc);
     const d = encoderDefaults[newEnc ?? ""] ?? {};
     editing.value.encoderPreset = pickIfAvailable(d.preset, ec?.presets);
     editing.value.encoderProfile = pickIfAvailable(d.profile, ec?.profiles);
     editing.value.encoderTune = pickIfAvailable(d.tune, ec?.tunes);
     editing.value.encoderLevel = pickIfAvailable(d.level, ec?.levels);
-    // Snap quality to the new encoder's typical CRF/CQ default so users
-    // aren't stranded at "22" when switching to AV1 (where 30+ is normal).
     editing.value.quality = defaultQualityFor(newEnc);
-    // HandBrake's own preset JSON sets VideoMultiPass=false for every
-    // hardware encoder — match that behavior. NVENC/QSV/VCE don't have a
-    // true second pass.
     if (isHardware(newEnc)) {
       editing.value.twoPass = false;
     }
@@ -172,10 +142,6 @@ watch(
 );
 
 async function load() {
-  // Render the profiles table as soon as the DB query returns; HandBrake caps
-  // (encoder discovery, slow on a cold cache because it shells out to
-  // HandBrakeCLI per encoder) fills in behind the scenes. Caps are only
-  // needed inside the edit dialog, so the table doesn't have to wait.
   const list = await notify.tryRun(() => api.profiles.list(), "Couldn't load profiles");
   if (list) items.value = list;
 
@@ -201,11 +167,6 @@ const audioEncoderOptions = [
   { value: "ac3", label: "AC-3" },
 ];
 
-// PrimeVue's Select treats an empty-string option value as "no selection" and
-// renders the placeholder instead, so "Keep source layout" wouldn't show as
-// selected when reopening a profile. Use a non-empty sentinel in the UI and
-// translate to/from "" (the wire value that tells the backend to omit
-// --mixdown so HandBrake matches the source layout) via mixdownModel below.
 const KEEP_SOURCE_MIXDOWN = "__source__";
 const audioMixdownOptions = [
   { value: KEEP_SOURCE_MIXDOWN, label: "Keep source layout" },
@@ -222,10 +183,6 @@ const mixdownModel = computed<string>({
   },
 });
 
-// Per-channel-count audio bitrate defaults — mirror internal/audio/bitrates.go.
-// AAC at ~64 kbps/channel is the widely-cited LC sweet spot; Opus at ~48 kbps/
-// channel (with 96 stereo / 256 5.1 anchored to the industry "transparent"
-// values) reflects its higher coding efficiency.
 const AUDIO_DEFAULTS_AAC: Record<number, number> = {
   1: 64, 2: 128, 3: 192, 4: 256, 5: 320, 6: 384, 7: 448, 8: 512,
 };
@@ -245,8 +202,6 @@ const channelRows: { ch: number; label: string }[] = [
   { ch: 7, label: "6.1" },
   { ch: 8, label: "7.1" },
 ];
-// Show the per-channel-count table only when we'd actually emit a per-track
-// --ab list: encoder re-encodes audio AND mixdown is "keep source layout".
 const showPerChannelBitrates = computed(() => {
   const enc = editing.value?.audioEncoder ?? "";
   return enc !== "" && enc !== "copy" && (editing.value?.audioMixdown ?? "") === "";
@@ -272,8 +227,6 @@ const rateControlOptions = [
 ];
 
 function defaultProfile(): Partial<Profile> {
-  // Prefer x265 if it's available — it's the best general-purpose default for
-  // re-encoding a mixed library. Falls back to whatever HandBrake reports first.
   const names = caps.value.encoders.map((e) => e.name);
   const enc = names.find((n) => n === "x265") ?? names[0] ?? "x265";
   const ec = capsForEncoder(enc);
@@ -324,13 +277,6 @@ const bloatPolicyOptions = [
   { value: "retry_higher_crf", label: "Retry with higher CRF, then keep original" },
 ];
 
-// fillDefaults normalises a profile loaded from the API so the dialog shows
-// concrete selected values for every dropdown, not blanks. Older profiles
-// (and freshly-defaulted ones) often store "" for fields that semantically
-// mean "use the encoder default" — that empty value isn't in the option
-// list, so the Select would render blank. We resolve those to real values
-// from HandBrake's preset_builtin.json, validated against what HandBrakeCLI
-// reports for this build.
 function fillDefaults(p: Partial<Profile>): Partial<Profile> {
   const ec = capsForEncoder(p.encoder);
   const d = encoderDefaults[p.encoder ?? ""] ?? {};
@@ -338,8 +284,6 @@ function fillDefaults(p: Partial<Profile>): Partial<Profile> {
   if (!p.encoderProfile) p.encoderProfile = pickIfAvailable(d.profile, ec?.profiles);
   if (!p.encoderTune) p.encoderTune = pickIfAvailable(d.tune, ec?.tunes);
   if (!p.encoderLevel) p.encoderLevel = pickIfAvailable(d.level, ec?.levels);
-  // Audio: an empty audioEncoder column in the DB historically meant "copy
-  // all" (passthrough). Make that explicit in the dropdown.
   if (!p.audioEncoder) p.audioEncoder = "copy";
   if (!p.audioBitratesByChannels) p.audioBitratesByChannels = {};
   if (!p.rateControl) p.rateControl = "crf";
@@ -481,7 +425,6 @@ onMounted(load);
       <div v-if="editing" class="editor">
         <div v-if="validationError" class="error">{{ validationError }}</div>
 
-        <!-- Top strip: name + a couple of headline knobs always in sight -->
         <section class="block block-head">
           <label class="field field-wide">
             <span>Profile name</span>
@@ -522,7 +465,6 @@ onMounted(load);
         </section>
 
         <div class="grid">
-          <!-- VIDEO ENCODER -->
           <section class="block">
             <h3 class="block-title">Video encoder</h3>
             <div class="fields">
@@ -601,7 +543,6 @@ onMounted(load);
             </div>
           </section>
 
-          <!-- VIDEO OUTPUT -->
           <section class="block">
             <h3 class="block-title">Video output</h3>
             <div class="fields">
@@ -633,7 +574,6 @@ onMounted(load);
             </div>
           </section>
 
-          <!-- AUDIO -->
           <section class="block">
             <h3 class="block-title">Audio</h3>
             <div class="fields">
@@ -673,10 +613,6 @@ onMounted(load);
               </label>
             </div>
 
-            <!-- Per-channel-count bitrate inputs — shown only when keeping the
-                 source layout (a single bitrate can't sensibly apply to both
-                 stereo and 5.1 tracks). Pre-filled with encoder-aware
-                 defaults; any input the user changes is stored as an override. -->
             <div v-if="showPerChannelBitrates" class="subsection">
               <div class="subsection-head">
                 <span class="block-title">Bitrate per channel layout (kbps)</span>
@@ -704,7 +640,6 @@ onMounted(load);
             </p>
           </section>
 
-          <!-- ADVANCED -->
           <section class="block">
             <h3 class="block-title">Advanced</h3>
             <div class="fields">
@@ -720,7 +655,6 @@ onMounted(load);
             <p class="muted hint">Appended verbatim to the HandBrakeCLI command. Use with care.</p>
           </section>
 
-          <!-- SIZE GUARD — post-encode policy -->
           <section class="block block-full">
             <div class="block-title-row">
               <h3 class="block-title">Size guard</h3>
@@ -797,7 +731,6 @@ onMounted(load);
             </p>
           </section>
 
-          <!-- PRE-ENCODE FILTERS — full-width, denser grid -->
           <section class="block block-full">
             <div class="block-title-row">
               <h3 class="block-title">Pre-encode filters</h3>
@@ -911,15 +844,12 @@ onMounted(load);
   padding: 0.5rem 0.75rem;
   border-radius: 4px;
 }
-/* Power-user editor layout. Card per logical group, two-column at desktop,
-   one-column at narrower breakpoints (Dialog already drops to 95vw at <1100px). */
 .editor {
   display: flex;
   flex-direction: column;
   gap: 0.85rem;
 }
 
-/* Top strip: name + container + quality always in sight */
 .block-head {
   display: grid;
   grid-template-columns: 1.6fr 0.9fr 0.7fr;
@@ -927,8 +857,6 @@ onMounted(load);
   align-items: end;
 }
 
-/* The two-column card grid for the body. Most cards span one column;
-   .block-full spans both. */
 .grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -946,7 +874,6 @@ onMounted(load);
   }
 }
 
-/* Card primitive */
 .block {
   background: var(--rc-surface);
   border: 1px solid var(--rc-border);
@@ -977,7 +904,6 @@ onMounted(load);
   min-width: 18rem;
 }
 
-/* Two-column field grid inside each card */
 .fields {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -995,7 +921,6 @@ onMounted(load);
   }
 }
 
-/* A single field: small uppercase label above its input */
 .field {
   display: flex;
   flex-direction: column;
@@ -1031,7 +956,6 @@ onMounted(load);
   flex: 0 0 6rem;
 }
 
-/* Make every input fill its slot so the grid columns line up cleanly */
 .field :deep(.p-inputtext),
 .field :deep(.p-inputnumber),
 .field :deep(.p-inputnumber-input),
@@ -1066,15 +990,11 @@ onMounted(load);
   font-size: 0.82rem;
 }
 
-/* Reserve dialog content area so it scrolls cleanly on short viewports */
 :deep(.profile-dialog .p-dialog-content) {
   max-height: 80vh;
   overflow-y: auto;
 }
 
-/* Audio per-channel-count bitrate subsection — sits inside the Audio block,
-   below the main 2-col fields grid. Reuses the existing .fields/.field
-   styling so the inputs match the rest of the form visually. */
 .subsection {
   margin-top: 0.85rem;
   padding-top: 0.85rem;

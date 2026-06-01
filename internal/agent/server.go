@@ -19,28 +19,19 @@ import (
 	"github.com/sratabix/recodarr/internal/handbrake"
 )
 
-// AgentVersion is the human-readable version string reported by /healthz.
-// Bump on protocol-affecting changes; the server-side client can refuse to
-// talk to old agents if needed.
 const AgentVersion = "1"
 
-// Server bundles the HTTP handlers for an agent process. It owns nothing
-// long-lived — the store and runner are passed in and managed by the caller.
 type Server struct {
 	store  *Store
 	runner *Runner
 	token  string
-	hbFor  func(jobID int64) io.Writer // kept for parity with server mode; unused here
+	hbFor  func(jobID int64) io.Writer
 }
 
-// NewServer constructs the server. Caller wires Handler() into an http.Server.
 func NewServer(store *Store, runner *Runner, token string, hbFor func(jobID int64) io.Writer) *Server {
 	return &Server{store: store, runner: runner, token: token, hbFor: hbFor}
 }
 
-// Handler returns the routed HTTP handler. /healthz is intentionally outside
-// the bearer-token middleware so reverse-proxy liveness checks don't need
-// the token. Every other endpoint requires the token.
 func (s *Server) Handler() http.Handler {
 	r := chi.NewRouter()
 	r.Route(PathPrefix, func(r chi.Router) {
@@ -60,9 +51,6 @@ func (s *Server) Handler() http.Handler {
 	return r
 }
 
-// bearerAuth enforces the shared token on every protected endpoint. Uses a
-// constant-time compare so a hostile client can't time-attack the token byte
-// by byte.
 func (s *Server) bearerAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
@@ -184,8 +172,7 @@ func (s *Server) getJob(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) listJobs(w http.ResponseWriter, _ *http.Request) {
 	all := s.store.List()
-	// Strip the request body for the list view — it's bulky and not useful
-	// for monitoring.
+
 	for _, js := range all {
 		js.Request = nil
 	}
@@ -209,9 +196,6 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 
-	// Replay the current state so a client connecting after the encode has
-	// already started immediately sees where things are at. After that, only
-	// new events arrive.
 	writeSSE(w, EventState, StatePayload{State: js.State, Error: js.Error})
 	if js.Progress.Percent > 0 {
 		writeSSE(w, EventProgress, js.Progress)
@@ -229,7 +213,6 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		case e, ok := <-ch:
 			if !ok {
-				// Runner closed the channel because the job terminated.
 				return
 			}
 			if e.Progress != nil {
@@ -258,9 +241,7 @@ func (s *Server) downloadOutput(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := s.store.OutputPath(js)
-	// ServeFile handles Range, ETag, and content-type sniffing for us.
-	// Defaulting Content-Type to application/octet-stream so clients don't
-	// try to render video bytes inline.
+
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", "attachment; filename="+strconv.Quote(js.Request.Filename))
 	http.ServeFile(w, r, path)
@@ -281,7 +262,6 @@ func (s *Server) deleteJob(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	js, ok := s.store.Get(id)
 	if !ok {
-		// Idempotent delete: 204 is the right answer either way.
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -306,8 +286,6 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, ErrorResponse{Error: msg})
 }
 
-// writeSSE emits a single SSE event. Keeps the framing in one place so the
-// client side knows exactly what to parse.
 func writeSSE(w io.Writer, event string, payload any) {
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -323,5 +301,4 @@ func firstLine(s string) string {
 	return s
 }
 
-// silence imports if any block above gets refactored away.
 var _ = errors.New

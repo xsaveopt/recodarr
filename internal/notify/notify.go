@@ -12,12 +12,8 @@ import (
 	"github.com/sratabix/recodarr/internal/store"
 )
 
-// notifyClient bounds outbound notify requests so a slow/hanging endpoint
-// can't pin a worker goroutine indefinitely.
 var notifyClient = &http.Client{Timeout: 10 * time.Second}
 
-// Send fires a notification webhook if configured and the given status matches the user's prefs.
-// Compatible with ntfy, Gotify, and any generic JSON webhook.
 func Send(ctx context.Context, st *store.Store, title, status, filePath string, originalSize, finalSize int64) {
 	cfg, err := st.LoadAppSettings(ctx)
 	if err != nil {
@@ -78,10 +74,6 @@ func Send(ctx context.Context, st *store.Store, title, status, filePath string, 
 	slog.Debug("notification sent", "status", status, "title", title, "httpStatus", resp.StatusCode)
 }
 
-// SendHealth fires a notification for a health issue transition. transition is
-// "opened" when an issue first appears or "resolved" when it clears. The
-// caller is expected to dedupe; this function fires every call unless the user
-// has disabled NotifyOnHealth.
 func SendHealth(ctx context.Context, st *store.Store, source, title, detail, level, transition string) {
 	cfg, err := st.LoadAppSettings(ctx)
 	if err != nil {

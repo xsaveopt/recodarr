@@ -9,26 +9,11 @@ import (
 	"github.com/sratabix/recodarr/internal/store"
 )
 
-// evaluateFilters runs the profile's pre-encode skip rules against the source
-// file. Returns (skip, reason) — when skip is true, the worker should mark the
-// job as `skipped` with reason instead of encoding.
-//
-// Behavior when ffprobe is missing or fails:
-//   - File-size rule still works (we have the size from *arr's webhook payload).
-//   - Codec / bitrate / duration / height / HDR rules are silently dropped,
-//     because we can't evaluate them without media info. We err on the side of
-//     "encode anyway" rather than "skip everything" — wrong skips are worse
-//     than wrong encodes here.
-//
-// Each rule is independent and short-circuits on first match so the reason is
-// the first triggered filter.
 func evaluateFilters(ctx context.Context, p *store.ProfileRow, j store.JobRow) (bool, string) {
 	if !filtersConfigured(p) {
 		return false, ""
 	}
 
-	// File size is cheap — we already have it. Check first so we can skip the
-	// ffprobe entirely when the file's so small it's not worth probing.
 	if p.SkipFileSizeMB > 0 && j.FileSize > 0 {
 		mb := j.FileSize / (1024 * 1024)
 		if mb <= int64(p.SkipFileSizeMB) {
@@ -36,7 +21,6 @@ func evaluateFilters(ctx context.Context, p *store.ProfileRow, j store.JobRow) (
 		}
 	}
 
-	// Everything else needs ffprobe.
 	needsProbe := p.SkipCodecs != "" ||
 		p.SkipBitrateMBPerHour > 0 ||
 		p.SkipDurationMinutes > 0 ||
@@ -48,7 +32,6 @@ func evaluateFilters(ctx context.Context, p *store.ProfileRow, j store.JobRow) (
 
 	pr, err := probe.Run(ctx, j.FilePath)
 	if err != nil {
-		// Couldn't probe — fall through to encoding. The caller logs.
 		return false, ""
 	}
 

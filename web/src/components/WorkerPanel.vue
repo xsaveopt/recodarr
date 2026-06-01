@@ -21,8 +21,6 @@ const enabled = ref<boolean>(true);
 const suffixEnabled = ref<boolean>(false);
 const outputSuffix = ref<string>("recodarr");
 
-// Keep the local toggle in lockstep with the shared poller so toggling pause
-// from the topbar (or another tab) updates this panel without a manual refresh.
 watch(
   () => workerStatus.value?.paused,
   (p) => {
@@ -50,10 +48,6 @@ const suffixPreview = computed(
   () => `Movie (2024).mkv  →  Movie (2024).${outputSuffix.value || "recodarr"}`,
 );
 
-// The pause toggle calls the dedicated worker endpoint rather than the bulk
-// settings save, because pausing has a side-effect: it cancels and re-queues
-// any in-flight encodes immediately. The settings save path only writes the
-// flag — no cancellation.
 async function toggleEnabled(next: boolean) {
   const pause = !next;
   const res = await notify.tryRun(
@@ -61,7 +55,7 @@ async function toggleEnabled(next: boolean) {
     pause ? "Couldn't pause" : "Couldn't resume",
   );
   if (res === undefined) {
-    enabled.value = !next; // revert UI on failure
+    enabled.value = !next;
     return;
   }
   if (pause) {
@@ -118,8 +112,6 @@ onMounted(load);
       Controls how frequently Recodarr checks for seed completion and starts encodes.
     </p>
 
-    <!-- Master on/off — instant, outside the Save flow below so toggling it
-         actually applies without an extra click. -->
     <div class="instant-card" :class="{ paused: !enabled }">
       <label class="pause-row">
         <span class="pause-label">

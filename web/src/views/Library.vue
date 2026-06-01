@@ -27,7 +27,6 @@ const hideProcessed = ref(true);
 const queuing = ref(false);
 
 const confirmOpen = ref(false);
-// Soft cap: any single click that would create more than this many jobs prompts first.
 const QUEUE_CONFIRM_THRESHOLD = 100;
 
 const activeInstance = computed(() =>
@@ -40,9 +39,6 @@ const eligibleInstances = computed(() =>
 const filteredItems = computed(() => {
   const needle = titleFilter.value.trim().toLowerCase();
   return items.value.filter((it) => {
-    // "Already known" = either completed or still queued/encoding. Both should
-    // hide by default since queueing them again would just be a no-op (the
-    // backend's HasActiveJob check would skip the insert).
     if (hideProcessed.value && (it.doneJobs > 0 || it.activeJobs > 0)) return false;
     if (needle && !it.title.toLowerCase().includes(needle)) return false;
     return true;

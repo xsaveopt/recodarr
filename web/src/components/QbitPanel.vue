@@ -51,11 +51,6 @@ async function test() {
   testing.value = true;
   testResult.value = null;
   try {
-    // Two test paths:
-    //   - inline (URL/user/pass from the form) when there's no saved row yet,
-    //     or when the user typed a new password they want to test before saving.
-    //   - by id (uses the stored password) when the row exists and the password
-    //     field is blank — otherwise we'd send "" and qBit would reject.
     const useStored = item.value.id > 0 && !item.value.password?.trim();
     testResult.value = useStored
       ? await api.qbit.test(item.value.id)

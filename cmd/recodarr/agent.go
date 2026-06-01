@@ -19,10 +19,6 @@ import (
 	"github.com/sratabix/recodarr/internal/logging"
 )
 
-// runAgent boots the binary in remote-encode-agent mode. The shape mirrors
-// runServer's bootstrap (read env, set up logging, probe HandBrake) but
-// skips everything Recodarr-specific: no SQLite, no SPA, no *arr clients, no
-// job pump, no health checker. Only the HTTP encode protocol runs.
 func runAgent() error {
 	dataDir := envOr("RECODARR_DATA_DIR", "/data")
 	addr := envOr("RECODARR_AGENT_ADDR", ":8090")
@@ -41,10 +37,6 @@ func runAgent() error {
 		maxParallel = n
 	}
 
-	// Logging: agent shares Recodarr's logging package so the same panel
-	// in the server UI doesn't lie about file destinations — but the agent
-	// doesn't read settings from a DB, so all log knobs come from env. For
-	// now, default to INFO + filesystem rotation under <data>/logs/.
 	sinks, err := logging.Setup(logging.Options{
 		Dir:           filepath.Join(dataDir, "logs"),
 		AppLevel:      logging.ParseLevel(envOr("RECODARR_AGENT_LOG_LEVEL", "INFO")),
@@ -59,8 +51,6 @@ func runAgent() error {
 	defer sinks.Close()
 	logger := sinks.App
 
-	// Probe HandBrake loudly at boot so a missing binary surfaces here, not
-	// hours later on the first encode attempt.
 	if v := handbrake.VersionString(); strings.HasPrefix(v, "(HandBrakeCLI not found)") {
 		logger.Warn("HandBrakeCLI not found on PATH — encodes will fail until installed")
 	} else {
@@ -104,5 +94,4 @@ func runAgent() error {
 	return nil
 }
 
-// silence unused-import warnings if any var refs above get refactored away later.
 var _ = slog.LevelInfo

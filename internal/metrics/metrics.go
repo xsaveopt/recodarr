@@ -1,16 +1,3 @@
-// Package metrics exposes Recodarr internals to Prometheus.
-//
-// Mounted by the API router at /metrics, outside the /api group so it's not
-// behind the session-cookie auth middleware. If RECODARR_METRICS_TOKEN is set,
-// the handler requires `Authorization: Bearer <token>`; otherwise it's open
-// (which is the conventional setup for self-hosted apps — no secrets are
-// emitted, only counts and timestamps).
-//
-// Strategy: a single Collector pulls live values on each scrape via
-// Store.GetJobStats and Worker accessors. This avoids having to instrument
-// every job state transition; Prometheus only samples on its own schedule
-// (typically 15–60s) and the queries are cheap (one COUNT(*) GROUP BY status
-// + a few in-memory mutex reads).
 package metrics
 
 import (
@@ -30,13 +17,8 @@ import (
 	"github.com/sratabix/recodarr/internal/store"
 )
 
-// scrapeTimeout caps a single /metrics request so a slow DB doesn't block
-// Prometheus indefinitely. The collector falls back to its last cached values
-// on timeout — better than failing the entire scrape.
 const scrapeTimeout = 5 * time.Second
 
-// Handler returns an http.Handler that serves Prometheus metrics. token is the
-// optional bearer token; empty string disables auth.
 func Handler(st *store.Store, w *job.Worker, token string) http.Handler {
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(
@@ -65,10 +47,6 @@ func Handler(st *store.Store, w *job.Worker, token string) http.Handler {
 	})
 }
 
-// collector is a prometheus.Collector that snapshots Recodarr state on each
-// scrape. Implementing the Collector interface (rather than registering one
-// gauge per metric and updating in handler) keeps reads atomic per-scrape and
-// avoids a goroutine just to refresh values.
 type collector struct {
 	store  *store.Store
 	worker *job.Worker

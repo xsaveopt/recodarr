@@ -28,14 +28,8 @@ const profiles = ref<Profile[]>([]);
 const busy = ref<Set<number>>(new Set());
 const selectedJobs = ref<Job[]>([]);
 const bulkBusy = ref(false);
-// Anchor for shift-click range selection. Holds the id of the last checkbox
-// the user toggled WITHOUT shift — shift+click on another row then selects
-// (or deselects) every row between the anchor and the new target on the
-// current page.
 const rangeAnchorId = ref<number | null>(null);
 
-// Statuses the user can pick in the Clear History dialog. Encoding jobs are
-// never deletable from here — cancel them first.
 const CLEARABLE_STATUSES = ["done", "failed", "skipped", "waiting_for_seed", "waiting_for_hardlink", "ready"] as const;
 const clearDialogOpen = ref(false);
 const clearStatuses = ref<string[]>(["done", "failed", "skipped"]);
@@ -47,8 +41,6 @@ const selectedDeletable = computed(() =>
 const selectedRetryable = computed(() =>
   selectedJobs.value.filter((j) => j.status === "failed" || j.status === "skipped" || j.status === "done").length,
 );
-// Profile reassignment skips in-flight encodes — that's the only status where
-// changing the profile would be a no-op (current run is already mid-stream).
 const selectedEditable = computed(() =>
   selectedJobs.value.filter((j) => j.status !== "encoding").length,
 );
@@ -56,29 +48,22 @@ const bulkProfileId = ref<number | null>(null);
 
 const bulkProfileOptions = computed(() => [
   { id: 0, name: "— Clear profile —" },
-  // Only allow assigning non-deleted profiles. Deleted ones still show up in
-  // the read-only profile column for historical jobs but can't be picked here.
   ...profiles.value.filter((p) => !p.deleted).map((p) => ({ id: p.id, name: p.name })),
 ]);
 
-// All known values — the multi-select defaults to all of them checked, so
-// "show everything" is the visual default and the user un-checks to filter out.
 const ALL_STATUSES = ["waiting_for_seed", "waiting_for_hardlink", "ready", "encoding", "done", "failed", "skipped"] as const;
 const ALL_KINDS = ["sonarr", "radarr"] as const;
 
 function parseList(raw: string | string[] | undefined, allowed: readonly string[]): string[] {
-  if (!raw) return [...allowed]; // unset query param → "show everything" preset
+  if (!raw) return [...allowed];
   const value = Array.isArray(raw) ? raw.join(",") : raw;
   const picked = value
     .split(",")
     .map((s) => s.trim())
     .filter((s) => allowed.includes(s));
-  // Empty after filtering = nothing checked, which the UI represents as
-  // status=__none__ in the URL so it round-trips honestly.
   return picked;
 }
 
-// URL-bound state so refresh / shareable links survive.
 const titleFilter = ref<string>((route.query.q as string) ?? "");
 const statusFilter = ref<string[]>(parseList(route.query.status as string | undefined, ALL_STATUSES));
 const kindFilter = ref<string[]>(parseList(route.query.kind as string | undefined, ALL_KINDS));
@@ -91,9 +76,8 @@ const pageSize = ref<number>(
 const pageOffset = ref<number>(route.query.offset ? Math.max(0, Number(route.query.offset)) : 0);
 
 function compactList(picked: string[], allowed: readonly string[]): string | undefined {
-  // All checked = no filter, omit from URL & query.
   if (picked.length === allowed.length) return undefined;
-  if (picked.length === 0) return undefined; // 0-of-N is the same as all-of-N to backend; UI shows empty box
+  if (picked.length === 0) return undefined;
   return picked.join(",");
 }
 
@@ -111,7 +95,6 @@ function syncURL() {
   });
 }
 
-// Debounce the free-text search so we don't fire a query per keystroke.
 let searchTimer: number | null = null;
 watch(titleFilter, () => {
   if (searchTimer != null) window.clearTimeout(searchTimer);
@@ -165,8 +148,6 @@ const kindOptions = [
   { value: "radarr", label: "Radarr" },
 ];
 
-// Hide deleted profiles from the filter dropdown — they can't be picked for new
-// work, only viewed in history.
 const profileOptions = computed(() => [
   { value: null, label: "All profiles" },
   ...profiles.value
@@ -214,9 +195,6 @@ function onPage(ev: DataTablePageEvent) {
 }
 
 async function loadProfiles() {
-  // includeDeleted: historical jobs may reference profiles the user has since
-  // removed; we still want to render the profile name (with a "(deleted)"
-  // suffix) instead of falling back to "#42".
   const list = await notify.tryRun(
     () => api.profiles.list({ includeDeleted: true }),
     "Couldn't load profiles",
@@ -325,9 +303,6 @@ async function bulkDelete() {
   });
 }
 
-// Shift-click range select: expand selection from rangeAnchorId to ev.data.id
-// (inclusive) on the visible page. Mirrors the typical file-manager pattern —
-// click row, shift-click another, every row in between flips to match.
 function applyRangeSelection(targetId: number, select: boolean) {
   const anchor = rangeAnchorId.value;
   if (anchor == null || anchor === targetId) return;

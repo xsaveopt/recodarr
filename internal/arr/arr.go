@@ -1,6 +1,3 @@
-// Package arr is a unified client for Sonarr and Radarr. They share the same /api/v3
-// surface for tags, system status, and command dispatch — the only meaningful divergence
-// is the webhook payload shape and the refresh command name. A Kind discriminator handles both.
 package arr
 
 import (
@@ -21,10 +18,6 @@ const (
 	KindRadarr Kind = "radarr"
 )
 
-// HTTPTransport is the http.RoundTripper used by every *arr client created
-// after this is set. Defaults to http.DefaultTransport. The logging package
-// swaps this for an outbound-logging wrapper at startup so Sonarr/Radarr
-// calls land in outbound.log instead of stdout.
 var HTTPTransport http.RoundTripper = http.DefaultTransport
 
 type Client struct {
@@ -50,21 +43,15 @@ type Tag struct {
 	Label string `json:"label"`
 }
 
-// Item is the normalized form of a Sonarr/Radarr webhook payload — only the fields
-// Recodarr actually consumes.
-//
-// ParentTags holds tag *labels* (strings), not IDs. *arr's webhook payloads
-// serialize series.tags / movie.tags as a list of labels regardless of how the
-// tags are stored internally; matching is therefore done by label.
 type Item struct {
 	EventType    string
-	ParentID     int64    // seriesId or movieId
+	ParentID     int64
 	ParentTitle  string
 	ParentPath   string
 	ParentTags   []string
-	FileID       int64    // episodeFileId or movieFileId
-	FilePath     string   // absolute, when present
-	RelativePath string   // path relative to ParentPath
+	FileID       int64
+	FilePath     string
+	RelativePath string
 	Size         int64
 	DownloadID   string
 }
@@ -77,13 +64,6 @@ func (c *Client) Tags(ctx context.Context) ([]Tag, error) {
 	return tags, nil
 }
 
-// LibraryItem is a single series or movie discovered via the REST API (not the
-// webhook). One Item per series/movie regardless of how many files it has;
-// FileCount and TotalSize are aggregates for display.
-//
-// TagIDs are integer IDs as returned by /api/v3/series and /api/v3/movie.
-// (Note: this is unlike *arr webhook payloads, which serialize the same field
-// as label strings — see Item.ParentTags.)
 type LibraryItem struct {
 	ID        int64
 	Title     string
@@ -93,8 +73,6 @@ type LibraryItem struct {
 	TotalSize int64
 }
 
-// LibraryFile is a single playable file under a series/movie. ParentID is the
-// seriesId / movieId; ID is the episodeFileId / movieFileId.
 type LibraryFile struct {
 	ID           int64
 	ParentID     int64
@@ -103,7 +81,6 @@ type LibraryFile struct {
 	Size         int64
 }
 
-// sonarrSeries is the subset of SeriesResource we need.
 type sonarrSeries struct {
 	ID         int64   `json:"id"`
 	Title      string  `json:"title"`
@@ -115,7 +92,6 @@ type sonarrSeries struct {
 	} `json:"statistics"`
 }
 
-// sonarrEpisodeFile is the subset of EpisodeFileResource we need.
 type sonarrEpisodeFile struct {
 	ID           int64  `json:"id"`
 	SeriesID     int64  `json:"seriesId"`
@@ -124,7 +100,6 @@ type sonarrEpisodeFile struct {
 	Size         int64  `json:"size"`
 }
 
-// radarrMovie is the subset of MovieResource we need.
 type radarrMovie struct {
 	ID         int64   `json:"id"`
 	Title      string  `json:"title"`
@@ -140,10 +115,6 @@ type radarrMovie struct {
 	} `json:"movieFile,omitempty"`
 }
 
-// Library returns the full library as normalized LibraryItems. For Radarr,
-// movies without a file (hasFile=false) are skipped — there's nothing to
-// re-encode. The full library is fetched in one call; both *arr APIs return
-// the entire list with no pagination.
 func (c *Client) Library(ctx context.Context) ([]LibraryItem, error) {
 	switch c.kind {
 	case KindSonarr:
@@ -195,8 +166,6 @@ func (c *Client) Library(ctx context.Context) ([]LibraryItem, error) {
 	}
 }
 
-// Files returns the playable files for a single parent (series or movie).
-// For Radarr there's at most one file per movie; for Sonarr there may be many.
 func (c *Client) Files(ctx context.Context, parentID int64) ([]LibraryFile, error) {
 	switch c.kind {
 	case KindSonarr:
@@ -220,8 +189,7 @@ func (c *Client) Files(ctx context.Context, parentID int64) ([]LibraryFile, erro
 		}
 		return out, nil
 	case KindRadarr:
-		// Radarr exposes the moviefile inline on the MovieResource; fetch the
-		// single movie and read its movieFile.
+
 		var m radarrMovie
 		if err := c.getJSON(ctx, fmt.Sprintf("/api/v3/movie/%d", parentID), &m); err != nil {
 			return nil, fmt.Errorf("radarr movie %d: %w", parentID, err)
@@ -241,16 +209,12 @@ func (c *Client) Files(ctx context.Context, parentID int64) ([]LibraryFile, erro
 	}
 }
 
-// ImportEvent is a single downloadFolderImported history record, reduced to the
-// fields backfill needs: where the file landed and which download-client item
-// (for qBittorrent, the torrent infohash) produced it.
 type ImportEvent struct {
 	DownloadID   string
 	ImportedPath string
 	Date         time.Time
 }
 
-// historyRecord is the subset of a Sonarr/Radarr history record we decode.
 type historyRecord struct {
 	DownloadID string    `json:"downloadId"`
 	EventType  string    `json:"eventType"`
@@ -260,11 +224,6 @@ type historyRecord struct {
 	} `json:"data"`
 }
 
-// ImportHistory returns this parent's downloadFolderImported events (those that
-// carry a download id), newest first. *arr's library API doesn't expose the
-// download-client hash, but its import history does — this is how a backfilled
-// library file recovers a torrent hash to poll qBit with. A series response
-// covers every episode; callers match the right event by path.
 func (c *Client) ImportHistory(ctx context.Context, parentID int64) ([]ImportEvent, error) {
 	var path string
 	switch c.kind {
@@ -290,13 +249,6 @@ func (c *Client) ImportHistory(ctx context.Context, parentID int64) ([]ImportEve
 	return out, nil
 }
 
-// MatchImportDownloadID picks the download id for the file at absPath from a
-// parent's import events (as returned by ImportHistory, newest first). It
-// matches on the imported path — exact, or by relative-path suffix to tolerate
-// the OS path-separator differing between the *arr host and Recodarr. For
-// Radarr (one file per movie) it falls back to the most recent import when no
-// path matches, since any import for that movie refers to the same file; for
-// Sonarr it never cross-matches episodes. Returns "" when nothing matches.
 func MatchImportDownloadID(events []ImportEvent, kind Kind, absPath, relativePath string) string {
 	relNorm := strings.ReplaceAll(relativePath, "\\", "/")
 	for _, e := range events {
@@ -314,7 +266,6 @@ func MatchImportDownloadID(events []ImportEvent, kind Kind, absPath, relativePat
 	return ""
 }
 
-// Ping verifies connectivity and API key, distinguishing 401 from other errors.
 func (c *Client) Ping(ctx context.Context) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v3/system/status", nil)
 	if err != nil {
@@ -336,7 +287,6 @@ func (c *Client) Ping(ctx context.Context) error {
 	}
 }
 
-// Refresh asks the *arr to rescan the parent (series or movie) so it picks up the new file.
 func (c *Client) Refresh(ctx context.Context, parentID int64) error {
 	var body any
 	switch c.kind {
@@ -382,14 +332,12 @@ func (c *Client) getJSON(ctx context.Context, path string, out any) error {
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
-// --- webhook payload parsing ---
-
 type sonarrPayload struct {
 	EventType string `json:"eventType"`
 	Series    struct {
-		ID    int64   `json:"id"`
-		Title string  `json:"title"`
-		Path  string  `json:"path"`
+		ID    int64    `json:"id"`
+		Title string   `json:"title"`
+		Path  string   `json:"path"`
 		Tags  []string `json:"tags,omitempty"`
 	} `json:"series"`
 	EpisodeFile struct {
@@ -406,7 +354,7 @@ type radarrPayload struct {
 	Movie     struct {
 		ID         int64    `json:"id"`
 		Title      string   `json:"title"`
-		FolderPath string   `json:"folderPath"` // Radarr's "path" equivalent on movies
+		FolderPath string   `json:"folderPath"`
 		Tags       []string `json:"tags,omitempty"`
 	} `json:"movie"`
 	MovieFile struct {
@@ -418,7 +366,6 @@ type radarrPayload struct {
 	DownloadID string `json:"downloadId"`
 }
 
-// ParseWebhook decodes a Sonarr or Radarr webhook body into a normalized Item.
 func ParseWebhook(kind Kind, body []byte) (*Item, error) {
 	switch kind {
 	case KindSonarr:

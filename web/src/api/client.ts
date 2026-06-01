@@ -28,8 +28,6 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   if (res.status === 401 && !path.startsWith("/auth/")) {
-    // Session expired or never existed — bounce to login. Preserve current path so
-    // the user can return after logging back in.
     const here = window.location.pathname + window.location.search;
     if (
       !window.location.pathname.startsWith("/login") &&

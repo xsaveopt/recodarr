@@ -14,39 +14,25 @@ import (
 	"github.com/sratabix/recodarr/internal/handbrake"
 )
 
-// terminalTTL is how long a finished job's on-disk directory hangs around
-// before the runner auto-deletes it. Gives the server-side client time to
-// fetch the output even if Recodarr's polling stalls briefly.
 const terminalTTL = 1 * time.Hour
 
-// tickInterval is how often the runner looks for queued jobs to start.
 const tickInterval = 1 * time.Second
 
-// Runner drives the encode lifecycle on the agent. Single goroutine + ticker:
-// claims queued jobs (up to MaxParallel), executes handbrake.Run, fans
-// progress + state events out to SSE subscribers. The server package consumes
-// those events; the runner never touches HTTP itself.
 type Runner struct {
 	store       *Store
 	maxParallel int
 
 	mu       sync.Mutex
-	active   map[string]context.CancelFunc // jobID → cancel for the in-flight encode
-	subs     map[string][]chan Event       // jobID → live subscriber channels
-	subIndex map[chan Event]string         // reverse: chan → jobID, for unsubscribe
+	active   map[string]context.CancelFunc
+	subs     map[string][]chan Event
+	subIndex map[chan Event]string
 }
 
-// Event is what subscribers receive over their SSE channel. Exactly one of
-// Progress / State is non-nil.
 type Event struct {
 	Progress *ProgressPayload
 	State    *StatePayload
 }
 
-// NewRunner constructs the runner. handbrakeWriter is currently unused — the
-// agent writes a per-job log file directly so DELETE /jobs/{id} fully cleans
-// up — but kept in the signature so the cmd entrypoint can pass the same
-// constructor it would in server mode without thinking about it.
 func NewRunner(store *Store, maxParallel int, _ func(jobID int64) io.Writer) *Runner {
 	if maxParallel < 1 {
 		maxParallel = 1
@@ -60,8 +46,6 @@ func NewRunner(store *Store, maxParallel int, _ func(jobID int64) io.Writer) *Ru
 	}
 }
 
-// Run drives the claim loop until ctx is cancelled. Call once from main; safe
-// to leave running for the process lifetime.
 func (r *Runner) Run(ctx context.Context) {
 	slog.Info("agent runner started", "maxParallel", r.maxParallel)
 	t := time.NewTicker(tickInterval)
@@ -82,9 +66,6 @@ func (r *Runner) Run(ctx context.Context) {
 }
 
 func (r *Runner) tick(ctx context.Context) {
-	// Cap concurrent encodes. HandBrake hwaccel doesn't parallelize on
-	// consumer GPUs, so the default is 1; operators with workstations can
-	// raise it via RECODARR_AGENT_MAX_PARALLEL.
 	r.mu.Lock()
 	free := r.maxParallel - len(r.active)
 	r.mu.Unlock()
@@ -102,9 +83,7 @@ func (r *Runner) encode(parent context.Context, id string) {
 	if !ok {
 		return
 	}
-	// Per-encode cancellable context so DELETE /v1/jobs/{id} (or process
-	// shutdown) can interrupt a running HandBrake. The store transitioned
-	// us into StateEncoding atomically inside ClaimQueued.
+
 	ctx, cancel := context.WithCancel(parent)
 	r.mu.Lock()
 	r.active[id] = cancel
@@ -125,14 +104,9 @@ func (r *Runner) encode(parent context.Context, id string) {
 	}
 	defer func() { _ = logFile.Close() }()
 
-	// Force NoCommit so Run leaves the encoded result at its temp path
-	// instead of trying to rename it over the source. We rename to the
-	// agent's deterministic OutputPath ourselves below.
 	settings := js.Request.Settings
 	settings.NoCommit = true
-	// Log what we actually received so the operator can confirm rate control
-	// arrived intact (the most common drift between server and agent is a
-	// mismatched binary version that silently strips unknown fields).
+
 	rateLabel := "crf"
 	rateVal := settings.Quality
 	if strings.EqualFold(settings.RateControl, "abr") {
@@ -154,8 +128,6 @@ func (r *Runner) encode(parent context.Context, id string) {
 
 	res, err := handbrake.Run(ctx, r.store.SourcePath(js), settings, sink, onProgress)
 	if err != nil {
-		// Distinguish operator-initiated cancellation from a crash so the
-		// subscriber sees the right terminal label.
 		if errors.Is(ctx.Err(), context.Canceled) {
 			r.finish(id, StateCancelled, errors.New("cancelled"), 0)
 			return
@@ -163,8 +135,7 @@ func (r *Runner) encode(parent context.Context, id string) {
 		r.finish(id, StateFailed, err, 0)
 		return
 	}
-	// Rename Run's sibling temp file to our deterministic output path so the
-	// download handler doesn't have to know about HandBrake's naming.
+
 	if err := os.Rename(res.TempPath, r.store.OutputPath(js)); err != nil {
 		_ = os.Remove(res.TempPath)
 		r.finish(id, StateFailed, fmt.Errorf("publish output: %w", err), 0)
@@ -200,9 +171,6 @@ func (r *Runner) finish(id string, terminal State, encErr error, finalSize int64
 	}
 }
 
-// Cancel asks the in-flight encode for id to stop. The runner transitions the
-// job to StateCancelled once HandBrake exits. Safe to call on a job that
-// isn't active; in that case the caller should just go straight to Delete.
 func (r *Runner) Cancel(id string) bool {
 	r.mu.Lock()
 	cancel, active := r.active[id]
@@ -214,9 +182,6 @@ func (r *Runner) Cancel(id string) bool {
 	return true
 }
 
-// Subscribe returns a channel that receives every event for id until the job
-// reaches a terminal state (channel closed) or the caller invokes unsubscribe.
-// Buffered so a slow consumer doesn't stall the runner; events drop on full.
 func (r *Runner) Subscribe(id string) (<-chan Event, func()) {
 	ch := make(chan Event, 32)
 	r.mu.Lock()
@@ -241,7 +206,7 @@ func (r *Runner) Subscribe(id string) (<-chan Event, func()) {
 		if len(r.subs[jid]) == 0 {
 			delete(r.subs, jid)
 		}
-		// Drain and close so the consumer's range-loop exits cleanly.
+
 		select {
 		case <-ch:
 		default:
@@ -258,8 +223,6 @@ func (r *Runner) publish(id string, e Event) {
 		select {
 		case ch <- e:
 		default:
-			// Slow consumer; drop. Progress events are idempotent so a
-			// missed one only loses a frame on the dashboard.
 		}
 	}
 }
@@ -277,10 +240,6 @@ func (r *Runner) closeSubscribers(id string) {
 	}
 }
 
-// cleanupTerminal removes per-job directories that have been in a terminal
-// state for longer than terminalTTL. The server-side client is expected to
-// DELETE the job after pulling the output, but if it doesn't (crash, network
-// drop) the agent shouldn't keep growing forever.
 func (r *Runner) cleanupTerminal() {
 	cutoff := time.Now().Add(-terminalTTL)
 	for _, js := range r.store.List() {

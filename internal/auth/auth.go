@@ -1,10 +1,3 @@
-// Package auth implements single-admin-user authentication for Recodarr.
-//
-// Storage: admin_users (one row, by design) + sessions (random opaque tokens, server-side
-// lookup, no JWT). Sessions live in SQLite so revocation is trivial — delete the row.
-//
-// Cookie: HttpOnly, SameSite=Strict, Secure if request was HTTPS. Path=/. The cookie value is
-// 32 random bytes hex-encoded; never the user id, never bcrypt output.
 package auth
 
 import (
@@ -21,7 +14,7 @@ import (
 
 const (
 	CookieName      = "recodarr_session"
-	SessionLifetime = 30 * 24 * time.Hour // 30 days
+	SessionLifetime = 30 * 24 * time.Hour
 	bcryptCost      = 12
 )
 
@@ -37,19 +30,12 @@ type Store struct {
 
 func New(db *sql.DB) *Store { return &Store{DB: db} }
 
-// HasAdmin reports whether an admin user exists. Used by the SPA to decide between
-// login screen and first-run setup screen.
 func (s *Store) HasAdmin(ctx context.Context) (bool, error) {
 	var n int
 	err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM admin_users`).Scan(&n)
 	return n > 0, err
 }
 
-// CreateAdmin creates the admin user. Fails if any admin already exists — the reset
-// flow (CLI subcommand) must wipe the row first.
-//
-// The INSERT is conditional on the table being empty so two simultaneous setup
-// requests can't each insert a different admin row (TOCTOU on HasAdmin).
 func (s *Store) CreateAdmin(ctx context.Context, username, password string) error {
 	if username == "" || password == "" {
 		return errors.New("username and password required")
@@ -75,9 +61,6 @@ func (s *Store) CreateAdmin(ctx context.Context, username, password string) erro
 	return nil
 }
 
-// VerifyPassword checks credentials. Returns the user id on success.
-// Constant-time bcrypt compare; do not short-circuit on missing user — still hash a
-// dummy to avoid trivial username-enumeration via timing.
 func (s *Store) VerifyPassword(ctx context.Context, username, password string) (int64, error) {
 	var id int64
 	var hash string
@@ -85,7 +68,7 @@ func (s *Store) VerifyPassword(ctx context.Context, username, password string) (
 		`SELECT id, password_hash FROM admin_users WHERE username = ?`, username).
 		Scan(&id, &hash)
 	if errors.Is(err, sql.ErrNoRows) {
-		_ = bcrypt.CompareHashAndPassword([]byte("$2a$12$" /* invalid, forces full-cost hash */), []byte(password))
+		_ = bcrypt.CompareHashAndPassword([]byte("$2a$12$"), []byte(password))
 		return 0, ErrBadCredential
 	}
 	if err != nil {
@@ -97,7 +80,6 @@ func (s *Store) VerifyPassword(ctx context.Context, username, password string) (
 	return id, nil
 }
 
-// AdminUsername returns the (only) admin's username, or "" if none.
 func (s *Store) AdminUsername(ctx context.Context) (string, error) {
 	var u string
 	err := s.DB.QueryRowContext(ctx, `SELECT username FROM admin_users LIMIT 1`).Scan(&u)
@@ -107,7 +89,6 @@ func (s *Store) AdminUsername(ctx context.Context) (string, error) {
 	return u, err
 }
 
-// CreateSession issues a fresh session token bound to userID and inserts it.
 func (s *Store) CreateSession(ctx context.Context, userID int64) (string, time.Time, error) {
 	tok, err := randomToken(32)
 	if err != nil {
@@ -123,7 +104,6 @@ func (s *Store) CreateSession(ctx context.Context, userID int64) (string, time.T
 	return tok, exp, nil
 }
 
-// LookupSession returns the user id for a valid, non-expired session token.
 func (s *Store) LookupSession(ctx context.Context, token string) (int64, error) {
 	if token == "" {
 		return 0, ErrBadCredential
@@ -146,19 +126,16 @@ func (s *Store) LookupSession(ctx context.Context, token string) (int64, error) 
 	return userID, nil
 }
 
-// DeleteSession invalidates a single session (logout).
 func (s *Store) DeleteSession(ctx context.Context, token string) error {
 	_, err := s.DB.ExecContext(ctx, `DELETE FROM sessions WHERE token = ?`, token)
 	return err
 }
 
-// PurgeExpiredSessions removes expired rows. Cheap; safe to call on startup.
 func (s *Store) PurgeExpiredSessions(ctx context.Context) error {
 	_, err := s.DB.ExecContext(ctx, `DELETE FROM sessions WHERE expires_at < ?`, time.Now())
 	return err
 }
 
-// ResetAdmin nukes admin user(s) and all sessions. Used by the `reset-admin` CLI.
 func (s *Store) ResetAdmin(ctx context.Context) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -182,9 +159,6 @@ func randomToken(nBytes int) (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// SetSessionCookie writes the session cookie on the response. Secure flag is set when
-// the request came in over HTTPS (TLS-terminating proxy must set X-Forwarded-Proto for
-// chi/middleware.RealIP-style flows; we look at r.TLS as the conservative default).
 func SetSessionCookie(w http.ResponseWriter, r *http.Request, token string, expires time.Time) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     CookieName,
@@ -197,8 +171,6 @@ func SetSessionCookie(w http.ResponseWriter, r *http.Request, token string, expi
 	})
 }
 
-// ClearSessionCookie expires the cookie client-side (defense in depth alongside the
-// server-side row delete).
 func ClearSessionCookie(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     CookieName,
@@ -215,7 +187,6 @@ type ctxKey int
 
 const userIDKey ctxKey = 1
 
-// UserIDFromContext returns the authenticated user id, or 0 if none.
 func UserIDFromContext(ctx context.Context) int64 {
 	if v, ok := ctx.Value(userIDKey).(int64); ok {
 		return v
@@ -223,8 +194,6 @@ func UserIDFromContext(ctx context.Context) int64 {
 	return 0
 }
 
-// Middleware enforces a valid session cookie. Returns 401 on failure (the SPA
-// router-guard turns that into a redirect to /login).
 func (s *Store) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := r.Cookie(CookieName)

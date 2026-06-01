@@ -11,7 +11,6 @@ import type { HealthSnapshot, Job, JobStats, JobStatus } from "@/types/api";
 const notify = useNotify();
 const stats = ref<JobStats | null>(null);
 const recentJobs = ref<Job[]>([]);
-// Ready jobs in the worker's actual claim order (id ASC) — i.e. what encodes next.
 const upNext = ref<Job[]>([]);
 const { status: workerStatus, refresh: refreshWorker } = useWorkerStatus();
 const health = ref<HealthSnapshot | null>(null);
@@ -49,18 +48,11 @@ const slotsLabel = computed(() => {
   return `${ws.encodingJobIds.length} / ${ws.maxParallelEncodes}`;
 });
 
-// Ready jobs beyond the few we list, plus jobs still waiting on seeding — shown
-// as small footnotes so the Up next list stays focused on what's imminent.
 const moreReady = computed(() => Math.max(0, (stats.value?.ready ?? 0) - upNext.value.length));
 const waitingCount = computed(
   () => (stats.value?.waitingForSeed ?? 0) + (stats.value?.waitingForHardlink ?? 0),
 );
 
-// Each call updates its slice of state as soon as it returns, so the page
-// paints progressively instead of blocking on the slowest of the four. Errors
-// from any one call surface as a toast but don't kill the rest. Only the first
-// load shows toasts on failure — background ticks fail silently so a transient
-// blip doesn't spam the user.
 async function loadOne<T>(fn: () => Promise<T>, errMsg: string, silent: boolean): Promise<T | null> {
   try {
     return await fn();
@@ -153,7 +145,6 @@ onUnmounted(() => {
 
 <template>
   <div class="dash">
-    <!-- Health issues — shown only when something is wrong -->
     <section v-if="health && health.issues.length" class="issues">
       <article
         v-for="(iss, idx) in health.issues"
@@ -173,7 +164,6 @@ onUnmounted(() => {
       </article>
     </section>
 
-    <!-- Status strip: worker + window -->
     <div v-if="workerStatus" class="status-strip">
       <span
         class="dot"
@@ -212,7 +202,6 @@ onUnmounted(() => {
       >
     </div>
 
-    <!-- Active encodes — the hero -->
     <section v-if="activeEncodes.length" class="block">
       <div class="block-head">
         <h2 class="block-title">Active encode<span v-if="activeEncodes.length > 1">s</span></h2>
@@ -236,7 +225,6 @@ onUnmounted(() => {
       </div>
     </section>
 
-    <!-- Stats grid: 5 minimal tiles, no color-coding noise -->
     <section v-if="stats" class="stats">
       <div class="stat">
         <div class="stat-label">Total saved</div>
@@ -269,7 +257,6 @@ onUnmounted(() => {
       </RouterLink>
     </section>
 
-    <!-- Two-column body: queue + recent -->
     <div class="grid">
       <section class="block">
         <div class="block-head">
@@ -309,7 +296,6 @@ onUnmounted(() => {
       </section>
     </div>
 
-    <!-- Empty state -->
     <div v-if="isEmpty" class="empty-card">
       <h3>Welcome to Recodarr.</h3>
       <p class="muted">
@@ -334,7 +320,6 @@ onUnmounted(() => {
   color: var(--rc-faint);
 }
 
-/* Health issues */
 .issues {
   display: flex;
   flex-direction: column;
@@ -394,7 +379,6 @@ onUnmounted(() => {
   background: color-mix(in srgb, var(--rc-fg) 6%, transparent);
 }
 
-/* Status strip */
 .status-strip {
   display: flex;
   align-items: center;
@@ -458,7 +442,6 @@ onUnmounted(() => {
   border-color: transparent;
 }
 
-/* Block (card) primitive */
 .block {
   background: var(--rc-surface);
   border: 1px solid var(--rc-border);
@@ -493,7 +476,6 @@ onUnmounted(() => {
   text-decoration: none;
 }
 
-/* Active encodes */
 .encodes {
   display: flex;
   flex-direction: column;
@@ -540,7 +522,6 @@ onUnmounted(() => {
   font-size: 0.78rem;
 }
 
-/* Stats */
 .stats {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -600,7 +581,6 @@ a.stat:hover {
   }
 }
 
-/* Two-column grid */
 .grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -612,7 +592,6 @@ a.stat:hover {
   }
 }
 
-/* List rows */
 .list {
   list-style: none;
   margin: 0;
@@ -698,7 +677,6 @@ a.stat:hover {
   color: var(--rc-muted);
 }
 
-/* First-run welcome */
 .empty-card {
   background: var(--rc-surface);
   border: 1px solid var(--rc-border);

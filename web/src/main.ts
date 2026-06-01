@@ -18,8 +18,6 @@ app.use(PrimeVue, {
   theme: {
     preset: Aura,
     options: {
-      // Mirror the class set by useTheme() on <html>. PrimeVue components
-      // re-themed via Aura follow this selector for dark mode.
       darkModeSelector: ".dark",
     },
   },

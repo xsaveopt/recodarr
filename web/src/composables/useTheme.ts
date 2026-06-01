@@ -22,10 +22,8 @@ function applyClass(t: Theme) {
 
 const theme = ref<Theme>(readStored());
 
-// Apply once on module load so the correct class is on <html> before mount.
 applyClass(theme.value);
 
-// Track OS changes only when in system mode.
 const mql = window.matchMedia?.("(prefers-color-scheme: dark)");
 mql?.addEventListener?.("change", () => {
   if (theme.value === "system") applyClass("system");

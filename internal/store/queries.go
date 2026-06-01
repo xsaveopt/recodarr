@@ -20,9 +20,7 @@ type ArrInstanceRow struct {
 	APIKey        string
 	Enabled       bool
 	WebhookSecret string
-	// DeletedAt is set when the row has been soft-deleted. List endpoints
-	// hide soft-deleted rows by default; GetArrInstance still returns them so
-	// historical job rows can resolve their instance name.
+
 	DeletedAt sql.NullTime
 }
 
@@ -42,11 +40,10 @@ type ProfileRow struct {
 	EncoderProfile string
 	EncoderTune    string
 	EncoderLevel   string
-	// RateControl is either "crf" (constant quality, uses Quality) or "abr"
-	// (average bitrate, uses VideoBitrate). Empty defaults to "crf".
+
 	RateControl     string
 	Quality         int
-	VideoBitrate    int // kbps; only meaningful when RateControl="abr"
+	VideoBitrate    int
 	MaxWidth        int
 	MaxHeight       int
 	SubtitleCopy    bool
@@ -57,31 +54,23 @@ type ProfileRow struct {
 	AudioEncoder    string
 	AudioBitrate    int
 	AudioMixdown    string
-	// AudioBitratesByChannels is a JSON map of channel-count → kbps used when
-	// AudioMixdown is empty (keep source layout). Each output audio track is
-	// re-encoded at the bitrate matching its source channel count. Empty/missing
-	// "{}" means "use encoder-aware defaults" (see internal/audiomix).
+
 	AudioBitratesByChannels string
-	// Pre-encode filters; zero/empty = filter inactive.
-	SkipCodecs           string // comma-separated, lowercase, e.g. "av1,hevc"
+
+	SkipCodecs           string
 	SkipBitrateMBPerHour int
-	// SkipBitrateUnit selects how SkipBitrateMBPerHour is interpreted:
-	// "mb_per_hour" (default, the legacy meaning) or "kbps". The column name
-	// was kept for backward compatibility; the number is just "bitrate threshold".
+
 	SkipBitrateUnit     string
 	SkipFileSizeMB      int
 	SkipDurationMinutes int
 	SkipHeightPx        int
 	SkipHDR             bool
-	// Post-encode size guard.
-	BloatPolicy            string // "off" | "keep_original" | "retry_higher_crf"
+
+	BloatPolicy            string
 	BloatRetryMax          int
 	BloatRetryStep         int
 	BloatMinSavingsPercent int
-	// DeletedAt is set when the profile has been soft-deleted. List endpoints
-	// hide soft-deleted profiles by default; GetProfile still returns them so
-	// historical job rows resolve a name. Tag mappings pointing at a deleted
-	// profile are dropped at delete time (see DeleteProfile).
+
 	DeletedAt sql.NullTime
 }
 
@@ -115,13 +104,9 @@ type JobRow struct {
 	FinishedAt    sql.NullTime
 	OriginalSize  sql.NullInt64
 	FinalSize     sql.NullInt64
-	// Tags is a JSON-encoded []string of the *arr tag labels that were on
-	// the item when the webhook fired. Used by the worker to re-resolve the
-	// profile against the current tag→profile mappings, so mapping edits
-	// take effect on queued jobs.
+
 	Tags string
-	// Source is how the job was created. 'webhook' = pushed by Sonarr/Radarr;
-	// 'backfill' = enqueued manually from the Library page.
+
 	Source string
 }
 
@@ -143,8 +128,6 @@ func scanJob(scan func(...any) error) (JobRow, error) {
 	err := scan(&r.ID, &r.ArrKind, &r.ArrInstanceID, &r.ArrItemID, &r.ArrParentID, &r.Title, &r.FilePath, &r.FileSize, &r.DownloadID, &r.ProfileID, &r.Status, &r.Error, &r.EncodeLog, &r.RefreshError, &r.Attempts, &r.CreatedAt, &r.UpdatedAt, &r.StartedAt, &r.FinishedAt, &r.OriginalSize, &r.FinalSize, &r.Tags, &r.Source)
 	return r, err
 }
-
-// --- settings ---
 
 func (s *Store) GetSetting(ctx context.Context, key string) (string, bool, error) {
 	var v string
@@ -179,8 +162,6 @@ func (s *Store) GetAllSettings(ctx context.Context) (map[string]string, error) {
 	return out, rows.Err()
 }
 
-// --- arr instances ---
-
 const arrInstanceCols = `id,kind,name,url,api_key,enabled,webhook_secret,deleted_at`
 
 func scanArrInstance(scan func(...any) error) (ArrInstanceRow, error) {
@@ -193,8 +174,6 @@ func scanArrInstance(scan func(...any) error) (ArrInstanceRow, error) {
 	return r, nil
 }
 
-// ListArrInstances returns non-deleted instances. Use ListArrInstancesIncludingDeleted
-// when history lookups need access to soft-deleted rows.
 func (s *Store) ListArrInstances(ctx context.Context) ([]ArrInstanceRow, error) {
 	return s.listArrInstances(ctx, false)
 }
@@ -225,8 +204,6 @@ func (s *Store) listArrInstances(ctx context.Context, includeDeleted bool) ([]Ar
 	return out, rows.Err()
 }
 
-// GetArrInstance returns a row by ID even if it's been soft-deleted, so jobs
-// referencing a deleted instance can still resolve a name.
 func (s *Store) GetArrInstance(ctx context.Context, id int64) (*ArrInstanceRow, error) {
 	r, err := scanArrInstance(s.DB.QueryRowContext(ctx,
 		`SELECT `+arrInstanceCols+` FROM arr_instances WHERE id = ?`, id).Scan)
@@ -257,8 +234,6 @@ func (s *Store) CreateArrInstance(ctx context.Context, r ArrInstanceRow) (int64,
 }
 
 func (s *Store) UpdateArrInstance(ctx context.Context, r ArrInstanceRow) error {
-	// Preserve secrets the SPA never received: blank api_key/webhook_secret on input
-	// means "keep what's there", since GET intentionally redacts both.
 	var existingKey, existingSecret string
 	_ = s.DB.QueryRowContext(ctx,
 		`SELECT api_key, webhook_secret FROM arr_instances WHERE id=?`, r.ID).
@@ -291,15 +266,11 @@ func newWebhookSecret() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// DeleteArrInstance soft-deletes the row by setting deleted_at. Existing job
-// history still resolves the instance name via GetArrInstance.
 func (s *Store) DeleteArrInstance(ctx context.Context, id int64) error {
 	_, err := s.DB.ExecContext(ctx,
 		`UPDATE arr_instances SET deleted_at = CURRENT_TIMESTAMP WHERE id=? AND deleted_at IS NULL`, id)
 	return err
 }
-
-// --- qbit instance ---
 
 func (s *Store) ListQbitInstances(ctx context.Context) ([]QbitInstanceRow, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT id,name,url,username,password FROM qbit_instances ORDER BY id`)
@@ -352,8 +323,6 @@ func (s *Store) DeleteQbitInstance(ctx context.Context, id int64) error {
 	return err
 }
 
-// --- profiles ---
-
 const profileCols = `id,name,encoder,encoder_preset,encoder_profile,encoder_tune,encoder_level,rate_control,quality,video_bitrate,max_width,max_height,subtitle_copy,two_pass,container_format,extra_args,framerate,audio_encoder,audio_bitrate,audio_mixdown,audio_bitrates_by_channels,skip_codecs,skip_bitrate_mb_per_hour,skip_bitrate_unit,skip_file_size_mb,skip_duration_minutes,skip_height_px,skip_hdr,bloat_policy,bloat_retry_max,bloat_retry_step,bloat_min_savings_percent,deleted_at`
 
 func scanProfile(scan func(...any) error) (ProfileRow, error) {
@@ -371,8 +340,6 @@ func scanProfile(scan func(...any) error) (ProfileRow, error) {
 	return r, err
 }
 
-// ListProfiles returns non-deleted profiles. Use ListProfilesIncludingDeleted
-// when populating a name-lookup map for historical jobs.
 func (s *Store) ListProfiles(ctx context.Context) ([]ProfileRow, error) {
 	return s.listProfiles(ctx, false)
 }
@@ -446,11 +413,6 @@ func (s *Store) UpsertProfile(ctx context.Context, r ProfileRow) (int64, error) 
 	return r.ID, err
 }
 
-// DeleteProfile soft-deletes the profile and hard-deletes any tag_mappings
-// that pointed at it. Mappings are pure routing config (no historical value),
-// so dropping them keeps webhook resolution from queueing more work against a
-// profile the user just removed. The profile row itself is retained so job
-// history can still surface a name.
 func (s *Store) DeleteProfile(ctx context.Context, id int64) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -466,8 +428,6 @@ func (s *Store) DeleteProfile(ctx context.Context, id int64) error {
 	}
 	return tx.Commit()
 }
-
-// --- tag mappings ---
 
 func (s *Store) ListTagMappings(ctx context.Context) ([]TagMappingRow, error) {
 	rows, err := s.DB.QueryContext(ctx,
@@ -487,7 +447,6 @@ func (s *Store) ListTagMappings(ctx context.Context) ([]TagMappingRow, error) {
 	return out, rows.Err()
 }
 
-// ListTagMappingsByKind returns mappings that apply to the given kind or to 'both'.
 func (s *Store) ListTagMappingsByKind(ctx context.Context, kind string) ([]TagMappingRow, error) {
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT id,arr_kind,tag_id,tag_label,profile_id FROM tag_mappings WHERE arr_kind = ? OR arr_kind = 'both' ORDER BY id`,
@@ -522,25 +481,14 @@ func (s *Store) DeleteTagMapping(ctx context.Context, id int64) error {
 	return err
 }
 
-// --- jobs ---
-
-// JobListOptions controls filtering and pagination for ListJobs. Any field
-// left at its zero value is treated as "no filter" — the canonical "show
-// everything" call is ListJobs(ctx, JobListOptions{Limit: N}).
-//
-// Statuses/Kinds are include-lists: nil/empty means "any", otherwise the row
-// must match one of the listed values. The UI uses all-selected-by-default
-// multi-select so users can untick a status to hide it.
 type JobListOptions struct {
 	Statuses  []string
 	Kinds     []string
-	ProfileID int64  // exact match; 0 = any
-	Search    string // case-insensitive substring match against title
-	Limit     int    // 0 = default 50; capped at 500
+	ProfileID int64
+	Search    string
+	Limit     int
 	Offset    int
-	// Ascending orders by id ASC instead of the default DESC. id ASC matches the
-	// worker's claim order (oldest ready job first), so it's the true
-	// "next to encode" order — used by the dashboard's Up next list.
+
 	Ascending bool
 }
 
@@ -652,21 +600,17 @@ func (s *Store) HasActiveJob(ctx context.Context, arrKind string, arrInstanceID,
 	return n > 0, err
 }
 
-// ParentJobSummary aggregates job counts for a single arr_parent_id (seriesId / movieId).
 type ParentJobSummary struct {
-	Active int // status not in ('done','failed','skipped')
-	Done   int // status = 'done'
+	Active int
+	Done   int
 }
 
-// JobSummaryByParent returns a per-parent job summary for the given parent IDs.
-// Used by the Library page to label parents that already have queued or completed work.
-// Parents with no jobs are absent from the result map (zero-value lookups work fine).
 func (s *Store) JobSummaryByParent(ctx context.Context, arrKind string, arrInstanceID int64, parentIDs []int64) (map[int64]ParentJobSummary, error) {
 	out := make(map[int64]ParentJobSummary, len(parentIDs))
 	if len(parentIDs) == 0 {
 		return out, nil
 	}
-	const chunk = 500 // well under SQLITE_MAX_VARIABLE_NUMBER even with 3 bound params
+	const chunk = 500
 	for start := 0; start < len(parentIDs); start += chunk {
 		end := start + chunk
 		if end > len(parentIDs) {
@@ -726,9 +670,6 @@ func (s *Store) JobsByStatus(ctx context.Context, status string, limit int) ([]J
 	return out, rows.Err()
 }
 
-// RecoverOrphanEncoding resets jobs stuck in 'encoding' back to 'ready' and clears their
-// started_at. Called on startup so a crash/SIGKILL during encode doesn't permanently wedge a job.
-// Returns the list of file paths that were stuck so the caller can clean up *.recodarr.tmp* files.
 func (s *Store) RecoverOrphanEncoding(ctx context.Context) ([]string, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT file_path FROM jobs WHERE status = 'encoding'`)
 	if err != nil {
@@ -762,8 +703,6 @@ func (s *Store) TransitionJobStatus(ctx context.Context, id int64, from, to stri
 	return n > 0, err
 }
 
-// MaxJobAttempts caps how many times a job can be claimed for encoding before
-// MarkJobEncoding refuses. Prevents a job that crashes the binary from looping forever.
 const MaxJobAttempts = 5
 
 func (s *Store) MarkJobEncoding(ctx context.Context, id int64) (bool, error) {
@@ -777,10 +716,6 @@ func (s *Store) MarkJobEncoding(ctx context.Context, id int64) (bool, error) {
 	return n > 0, err
 }
 
-// RequeueEncoding moves a job from encoding back to ready and rolls back the
-// attempts counter that MarkJobEncoding incremented. Used when a running encode
-// is cancelled by the worker for an external reason (pause, shutdown) — the job
-// shouldn't be penalized in the retry budget for a cancellation it didn't cause.
 func (s *Store) RequeueEncoding(ctx context.Context, id int64) error {
 	_, err := s.DB.ExecContext(ctx,
 		`UPDATE jobs SET status='ready', started_at=NULL, original_size=NULL,
@@ -789,7 +724,6 @@ func (s *Store) RequeueEncoding(ctx context.Context, id int64) error {
 	return err
 }
 
-// SetRefreshError records why the post-encode *arr refresh failed (or clears it).
 func (s *Store) SetRefreshError(ctx context.Context, id int64, msg string) error {
 	_, err := s.DB.ExecContext(ctx,
 		`UPDATE jobs SET refresh_error = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
@@ -804,10 +738,6 @@ func (s *Store) MarkJobDone(ctx context.Context, id int64, finalSize int64) erro
 	return err
 }
 
-// MarkJobSkipped marks a job as skipped by a pre-encode filter (codec already
-// efficient, bitrate too low, etc.). The reason is stored in the `error`
-// column for surfacing in the UI; it isn't an error per se but the column is
-// already a free-text "why this is in a terminal state" slot.
 func (s *Store) MarkJobSkipped(ctx context.Context, id int64, reason string) error {
 	_, err := s.DB.ExecContext(ctx,
 		`UPDATE jobs SET status = 'skipped', finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP, error = ?, encode_log = ''
@@ -822,11 +752,6 @@ func (s *Store) MarkJobFailed(ctx context.Context, id int64, msg, encodeLog stri
 	return err
 }
 
-// RetryJob re-queues any terminal job — failed, skipped, or done. Done jobs
-// are useful for testing profile changes against an already-encoded file (the
-// file on disk gets re-encoded with the current profile settings). The
-// sidecar marker is only consulted at webhook time, so a manual retry
-// bypasses it cleanly.
 func (s *Store) RetryJob(ctx context.Context, id int64) error {
 	_, err := s.DB.ExecContext(ctx,
 		`UPDATE jobs SET status='waiting_for_seed', error='', encode_log='', refresh_error='', attempts=0, started_at=NULL, finished_at=NULL, original_size=NULL, final_size=NULL, updated_at=CURRENT_TIMESTAMP
@@ -850,8 +775,6 @@ func (s *Store) DeleteJob(ctx context.Context, id int64) error {
 	return err
 }
 
-// terminalStatuses is the canonical set DeleteTerminalJobs / DeleteJobsByIDs
-// will touch. Encoding jobs are never deleted here — cancel them first.
 var terminalStatuses = []string{"done", "failed", "skipped", "waiting_for_seed", "waiting_for_hardlink", "ready"}
 
 func isTerminalDeletable(s string) bool {
@@ -863,10 +786,6 @@ func isTerminalDeletable(s string) bool {
 	return false
 }
 
-// DeleteTerminalJobs removes jobs in any of the given statuses. When statuses
-// is empty, defaults to the historical {done, failed, skipped} set so old
-// callers keep working. Any status not in terminalStatuses is silently dropped
-// — we never delete encoding jobs through this path.
 func (s *Store) DeleteTerminalJobs(ctx context.Context, statuses []string) (int64, error) {
 	if len(statuses) == 0 {
 		statuses = []string{"done", "failed", "skipped"}
@@ -888,9 +807,6 @@ func (s *Store) DeleteTerminalJobs(ctx context.Context, statuses []string) (int6
 	return res.RowsAffected()
 }
 
-// DeleteJobsByIDs removes the listed jobs, but only those in a deletable
-// (non-encoding) status. Encoding jobs are skipped silently — the count
-// reflects what actually got removed.
 func (s *Store) DeleteJobsByIDs(ctx context.Context, ids []int64) (int64, error) {
 	if len(ids) == 0 {
 		return 0, nil
@@ -907,8 +823,6 @@ func (s *Store) DeleteJobsByIDs(ctx context.Context, ids []int64) (int64, error)
 	return res.RowsAffected()
 }
 
-// RetryJobsByIDs re-queues every terminal (failed/skipped/done) job in the
-// list. Encoding/waiting/ready jobs are skipped silently.
 func (s *Store) RetryJobsByIDs(ctx context.Context, ids []int64) (int64, error) {
 	if len(ids) == 0 {
 		return 0, nil
@@ -960,8 +874,6 @@ func (s *Store) InsertJob(ctx context.Context, r JobRow) (int64, error) {
 	return res.LastInsertId()
 }
 
-// UpdateJobProfile rewrites a job's profile_id. Used by the worker to
-// re-route a queued job after the operator changes tag→profile mappings.
 func (s *Store) UpdateJobProfile(ctx context.Context, id int64, profileID sql.NullInt64) error {
 	_, err := s.DB.ExecContext(ctx,
 		`UPDATE jobs SET profile_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
@@ -969,9 +881,6 @@ func (s *Store) UpdateJobProfile(ctx context.Context, id int64, profileID sql.Nu
 	return err
 }
 
-// SetJobsProfile bulk-updates profile_id on the listed jobs. In-flight encodes
-// are skipped (changing the profile mid-encode would do nothing useful), the
-// returned count reflects rows actually updated.
 func (s *Store) SetJobsProfile(ctx context.Context, ids []int64, profileID sql.NullInt64) (int64, error) {
 	if len(ids) == 0 {
 		return 0, nil

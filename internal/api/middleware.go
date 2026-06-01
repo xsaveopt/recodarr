@@ -8,10 +8,6 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
-// requestLogger logs every HTTP request to the provided access logger (which
-// the main wiring points at access.log). Wraps the response writer to capture
-// the actual status code we sent back. Stays out of the app/stdout log so
-// `docker logs` doesn't drown in per-request noise.
 func requestLogger(access *slog.Logger) func(http.Handler) http.Handler {
 	if access == nil {
 		access = slog.Default()
@@ -34,8 +30,6 @@ func requestLogger(access *slog.Logger) func(http.Handler) http.Handler {
 	}
 }
 
-// securityHeaders sets a conservative baseline of security-relevant response headers.
-// CSP is strict but allows the inline styles PrimeVue injects at runtime.
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
@@ -56,10 +50,6 @@ func securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
-// maxBody caps r.Body to n bytes. Decoders see io.ErrUnexpectedEOF when the
-// limit is hit and respond with a 4xx; without this, an attacker (or a bug)
-// could OOM the process by streaming a huge body. 1 MiB is plenty for our
-// JSON DTOs and *arr webhook payloads.
 func maxBody(n int64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -71,12 +61,6 @@ func maxBody(n int64) func(http.Handler) http.Handler {
 	}
 }
 
-// requireCustomHeader rejects mutating requests that don't carry a custom header.
-// Browsers won't send custom headers cross-origin without a CORS preflight (which
-// we don't allow), so this defeats classic form-based CSRF.
-//
-// The SPA fetcher always sends X-Recodarr; webhooks come from *arr (server-side,
-// no browser cookies) and have their own per-instance token, so they're exempt.
 func requireCustomHeader(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {

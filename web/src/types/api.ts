@@ -5,8 +5,8 @@ export interface ArrInstance {
   kind: ArrKind;
   name: string;
   url: string;
-  apiKey?: string; // write-only; never returned by GET
-  webhookSecret?: string; // write-only; never returned by GET
+  apiKey?: string;
+  webhookSecret?: string;
   enabled: boolean;
   hasApiKey: boolean;
   hasWebhookSecret: boolean;
@@ -18,7 +18,7 @@ export interface QbitInstance {
   name: string;
   url: string;
   username: string;
-  password?: string; // write-only
+  password?: string;
   hasPassword: boolean;
 }
 
@@ -38,16 +38,12 @@ export interface Profile {
   audioEncoder: string;
   audioBitrate: number;
   audioMixdown: string;
-  // Per-channel-count kbps used when audioMixdown is empty (keep source layout).
-  // Keys are stringified channel counts (e.g. "2", "6"). Missing/empty falls
-  // back to encoder-aware defaults.
   audioBitratesByChannels: Record<string, number>;
   subtitleCopy: boolean;
   twoPass: boolean;
   containerFormat: string;
   extraArgs: string;
   framerate: string;
-  // Pre-encode filters; zero/empty = inactive.
   skipCodecs: string;
   skipBitrateMBPerHour: number;
   skipBitrateUnit: "mb_per_hour" | "kbps";
@@ -55,7 +51,6 @@ export interface Profile {
   skipDurationMinutes: number;
   skipHeightPx: number;
   skipHDR: boolean;
-  // Post-encode size guard.
   bloatPolicy: "off" | "keep_original" | "retry_higher_crf";
   bloatRetryMax: number;
   bloatRetryStep: number;
@@ -162,15 +157,12 @@ export interface LibraryQueueResponse {
 }
 
 export interface JobListParams {
-  // Comma-separated lists; omitted means "any". Empty string is treated as
-  // "any" too — the UI sends omit when all options are checked.
   status?: string;
   kind?: string;
   profileId?: number;
   q?: string;
   limit?: number;
   offset?: number;
-  // "asc" orders by id ascending (the worker's encode order); default is "desc".
   order?: "asc" | "desc";
 }
 
@@ -225,13 +217,13 @@ export interface JobDebug {
 
 export interface WorkerStatus {
   isEncoding: boolean;
-  encodingJobId: number; // back-compat: lowest in-flight id, 0 if none
-  encodingJobIds: number[]; // all in-flight job ids
-  progress: ProgressEvent[]; // current progress per in-flight job
+  encodingJobId: number;
+  encodingJobIds: number[];
+  progress: ProgressEvent[];
   lastTickAt: string | null;
   window: WindowStatus;
-  maxParallelEncodes: number; // configured concurrency limit
-  paused: boolean; // master encoding-paused switch
+  maxParallelEncodes: number;
+  paused: boolean;
 }
 
 export interface ProgressEvent {

@@ -33,12 +33,7 @@ func main() {
 	}
 }
 
-// run dispatches on RECODARR_MODE. The default is the full server (UI + DB +
-// *arr + worker pump); "agent" runs a stripped-down HTTP service that accepts
-// encode jobs from a remote Recodarr server.
 func run() error {
-	// CLI subcommands take precedence over mode (reset-admin always means the
-	// server's admin table, not anything agent-related).
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "reset-admin":
@@ -60,17 +55,10 @@ func run() error {
 	}
 }
 
-// runServer hosts the long-lived primary process: SPA, *arr webhooks, worker
-// pump, health checker, the lot. Returning errors instead of calling
-// os.Exit ourselves lets defers (log flush, db close) run before exit.
 func runServer() error {
 	dataDir := envOr("RECODARR_DATA_DIR", "/data")
 	addr := envOr("RECODARR_ADDR", ":8080")
 
-	// Open the store first so logging can pick up the user's persisted
-	// rotation/level settings before we start writing rotated files. Goose's
-	// boot messages during migrate go through the bootstrap slog default
-	// (JSON-to-stderr) — fine for a one-shot startup event.
 	st, err := store.Open(dataDir + "/recodarr.db")
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
@@ -94,25 +82,16 @@ func runServer() error {
 	defer sinks.Close()
 	logger := sinks.App
 
-	// Route outbound HTTP for the *arr and qBit clients through the logging
-	// transport so calls land in outbound.log instead of stdout.
 	qbit.HTTPTransport = logging.OutboundTransport(http.DefaultTransport, sinks.Outbound)
 	arr.HTTPTransport = logging.OutboundTransport(http.DefaultTransport, sinks.Outbound)
 
-	// Best-effort cleanup of expired session rows on boot.
 	_ = auth.New(st.DB).PurgeExpiredSessions(context.Background())
 
-	// Probe HandBrakeCLI now so a missing binary is loud at startup, not silent
-	// until the first encode hours later.
 	if v := handbrake.VersionString(); strings.HasPrefix(v, "(HandBrakeCLI not found)") {
 		logger.Warn("HandBrakeCLI not found on PATH — encodes will fail until installed")
 	} else {
 		logger.Info("handbrake detected", "version", strings.SplitN(v, "\n", 2)[0])
-		// Warm the encoder caps cache in the background so the first hit
-		// to the Profiles page doesn't pay the ~15 × `HandBrakeCLI
-		// --encoder-preset-list` shell-out tax. QueryCaps is sync.Once
-		// behind, so this just guarantees the work happens during startup
-		// instead of on first UI navigation.
+
 		go handbrake.QueryCaps()
 	}
 
@@ -128,10 +107,6 @@ func runServer() error {
 	hc := health.New(st)
 	go hc.Run(ctx)
 
-	// Per-encode remote resolver. Reads agent settings live, does a short
-	// reachability ping, and decides remote-vs-local at encode-start so a
-	// freshly-started agent gets used on the very next encode (instead of
-	// having to wait up to the health-checker tick interval).
 	worker.SetRemoteEncoderResolver(func(rctx context.Context) job.RemoteEncoder {
 		cfg, err := st.LoadAppSettings(rctx)
 		if err != nil || !cfg.AgentEnabled || cfg.AgentURL == "" || cfg.AgentToken == "" {
@@ -143,8 +118,7 @@ func runServer() error {
 				slog.Warn("remote agent unreachable, falling back to local encode", "url", cfg.AgentURL, "err", err)
 				return nil
 			}
-			// Operator disabled local fallback: hand back the client so the
-			// encode fails loudly instead of silently going local.
+
 			slog.Warn("remote agent unreachable, fallback disabled — encode will fail", "url", cfg.AgentURL, "err", err)
 			return client
 		}
@@ -174,8 +148,6 @@ func runServer() error {
 	return nil
 }
 
-// recoverOrphanEncodes resets any 'encoding' jobs left over from a previous crash and
-// removes their leftover .recodarr.tmp.* sibling files so the next encode starts clean.
 func recoverOrphanEncodes(ctx context.Context, st *store.Store) {
 	paths, err := st.RecoverOrphanEncoding(ctx)
 	if err != nil {

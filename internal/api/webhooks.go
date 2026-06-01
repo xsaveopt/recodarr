@@ -28,11 +28,8 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// WebhookBasicAuthUser is the fixed Basic-auth username *arr must send. Pairs
-// with the per-instance webhook_secret as the password.
 const WebhookBasicAuthUser = "recodarr"
 
-// processable event types we react to. Sonarr/Radarr versions vary; accept the union.
 var processableEvents = map[string]bool{
 	"Download":               true,
 	"OnDownloadFileImported": true,
@@ -49,9 +46,6 @@ func handleArrWebhook(st *store.Store, kind arr.Kind) http.HandlerFunc {
 			return
 		}
 
-		// Resolve instance + auth FIRST, before reading the body. We don't want to
-		// parse untrusted JSON for unauthenticated callers, and we want to fail-fast
-		// when the URL points at a deleted/disabled row.
 		inst, instErr := loadArrInstance(r.Context(), st, instID, string(kind))
 		if instErr != nil {
 			slog.Warn("webhook: instance lookup failed", "kind", kind, "id", instID, "err", instErr)
@@ -63,7 +57,6 @@ func handleArrWebhook(st *store.Store, kind arr.Kind) http.HandlerFunc {
 			inst.WebhookSecret == "" ||
 			subtle.ConstantTimeCompare([]byte(user), []byte(WebhookBasicAuthUser)) != 1 ||
 			subtle.ConstantTimeCompare([]byte(pass), []byte(inst.WebhookSecret)) != 1 {
-			// Don't log attacker-controlled creds; just record that auth failed.
 			slog.Warn("webhook: auth failed",
 				"kind", kind, "id", instID,
 				"hasAuthHeader", ok)
@@ -121,9 +114,7 @@ func handleArrWebhook(st *store.Store, kind arr.Kind) http.HandlerFunc {
 			return
 		}
 		filePath = clean
-		// Sidecar marker: if enabled and a `<stem>.<suffix>` file exists next to
-		// the media file, Recodarr has already encoded this file. Skip silently
-		// with 204 so *arr replays / re-imports are idempotent.
+
 		if cfg, err := st.LoadAppSettings(r.Context()); err == nil && cfg.OutputSuffixEnabled {
 			if sidecarExists(filePath, cfg.OutputSuffix) {
 				slog.Debug("webhook skipped: sidecar present (already encoded)",
@@ -182,9 +173,6 @@ func respondInstanceError(w http.ResponseWriter, err error) {
 	http.Error(w, err.Error(), http.StatusBadRequest)
 }
 
-// findTagProfile checks the item's tags against global tag→profile mappings for this kind.
-// Match is by tag *label* (string), since *arr webhooks serialize tags as labels.
-// Items with no matching tag are silently skipped (returns false).
 func findTagProfile(ctx context.Context, st *store.Store, inst *store.ArrInstanceRow, itemTags []string) (sql.NullInt64, bool) {
 	mappings, err := st.ListTagMappingsByKind(ctx, inst.Kind)
 	if err != nil || len(mappings) == 0 {
@@ -202,11 +190,6 @@ func findTagProfile(ctx context.Context, st *store.Store, inst *store.ArrInstanc
 	return sql.NullInt64{}, false
 }
 
-// sidecarExists reports whether the marker file Recodarr writes after a
-// successful encode is present next to mediaPath. Marker has the same stem as
-// the media file with `suffix` as its extension (e.g. `Movie.mkv` →
-// `Movie.recodarr`). Any stat error is treated as "not present" — this is a
-// best-effort skip, not a security check.
 func sidecarExists(mediaPath, suffix string) bool {
 	if suffix == "" {
 		return false
@@ -218,9 +201,6 @@ func sidecarExists(mediaPath, suffix string) bool {
 	return err == nil
 }
 
-// sanitizeMediaPath rejects paths that aren't well-formed absolute file paths.
-// We trust *arr to send sensible paths, but the webhook body is attacker-controlled
-// if the per-instance secret leaks; this is a cheap defense-in-depth check.
 func sanitizeMediaPath(p string) (string, error) {
 	if p == "" {
 		return "", fmt.Errorf("empty path")
@@ -240,7 +220,6 @@ func sanitizeMediaPath(p string) (string, error) {
 	return clean, nil
 }
 
-// snippet returns up to n bytes of body for logging without dumping huge payloads.
 func snippet(b []byte, n int) string {
 	if len(b) > n {
 		return string(b[:n]) + "...(truncated)"

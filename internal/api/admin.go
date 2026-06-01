@@ -45,9 +45,9 @@ type arrInstanceDTO struct {
 	Kind          string `json:"kind"`
 	Name          string `json:"name"`
 	URL           string `json:"url"`
-	APIKey        string `json:"apiKey,omitempty"` // write-only; never returned
+	APIKey        string `json:"apiKey,omitempty"`
 	Enabled       bool   `json:"enabled"`
-	WebhookSecret string `json:"webhookSecret,omitempty"` // write-only; copyable URL is enough
+	WebhookSecret string `json:"webhookSecret,omitempty"`
 	HasAPIKey     bool   `json:"hasApiKey"`
 	HasSecret     bool   `json:"hasWebhookSecret"`
 	Deleted       bool   `json:"deleted"`
@@ -60,9 +60,6 @@ func (d arrInstanceDTO) toRow() store.ArrInstanceRow {
 	}
 }
 
-// arrRowToDTO redacts secrets. The SPA never receives api_key or webhook_secret;
-// it only learns whether they're set. Saving the form with a blank field means
-// "leave as is" (see Store.UpdateArrInstance).
 func arrRowToDTO(r store.ArrInstanceRow) arrInstanceDTO {
 	return arrInstanceDTO{
 		ID: r.ID, Kind: r.Kind, Name: r.Name, URL: r.URL,
@@ -78,7 +75,7 @@ type qbitInstanceDTO struct {
 	Name        string `json:"name"`
 	URL         string `json:"url"`
 	Username    string `json:"username"`
-	Password    string `json:"password,omitempty"` // write-only
+	Password    string `json:"password,omitempty"`
 	HasPassword bool   `json:"hasPassword"`
 }
 
@@ -90,9 +87,9 @@ type profileDTO struct {
 	EncoderProfile          string         `json:"encoderProfile"`
 	EncoderTune             string         `json:"encoderTune"`
 	EncoderLevel            string         `json:"encoderLevel"`
-	RateControl             string         `json:"rateControl"` // "crf" | "abr"
+	RateControl             string         `json:"rateControl"`
 	Quality                 int            `json:"quality"`
-	VideoBitrate            int            `json:"videoBitrate"` // kbps; only used when rateControl=abr
+	VideoBitrate            int            `json:"videoBitrate"`
 	MaxWidth                int            `json:"maxWidth"`
 	MaxHeight               int            `json:"maxHeight"`
 	AudioEncoder            string         `json:"audioEncoder"`
@@ -104,15 +101,15 @@ type profileDTO struct {
 	ContainerFormat         string         `json:"containerFormat"`
 	ExtraArgs               string         `json:"extraArgs"`
 	Framerate               string         `json:"framerate"`
-	// Pre-encode filters; zero/empty = inactive.
+
 	SkipCodecs           string `json:"skipCodecs"`
-	SkipBitrateMBPerHour int    `json:"skipBitrateMBPerHour"` // value; unit determines interpretation
-	SkipBitrateUnit      string `json:"skipBitrateUnit"`      // "mb_per_hour" (default) | "kbps"
+	SkipBitrateMBPerHour int    `json:"skipBitrateMBPerHour"`
+	SkipBitrateUnit      string `json:"skipBitrateUnit"`
 	SkipFileSizeMB       int    `json:"skipFileSizeMB"`
 	SkipDurationMinutes  int    `json:"skipDurationMinutes"`
 	SkipHeightPx         int    `json:"skipHeightPx"`
 	SkipHDR              bool   `json:"skipHDR"`
-	// Post-encode size guard.
+
 	BloatPolicy            string `json:"bloatPolicy"`
 	BloatRetryMax          int    `json:"bloatRetryMax"`
 	BloatRetryStep         int    `json:"bloatRetryStep"`
@@ -121,8 +118,6 @@ type profileDTO struct {
 }
 
 func profileRowToDTO(r store.ProfileRow) profileDTO {
-	// Decode the stored JSON; tolerate empty/invalid by returning an empty map
-	// (JSON marshals as "{}", which the SPA treats as "use defaults").
 	bitrates := map[string]int{}
 	if r.AudioBitratesByChannels != "" && r.AudioBitratesByChannels != "{}" {
 		_ = json.Unmarshal([]byte(r.AudioBitratesByChannels), &bitrates)
@@ -183,9 +178,6 @@ type statsDTO struct {
 	TotalSavedBytes    int64 `json:"totalSavedBytes"`
 }
 
-// LogLevelSetter is the surface area the settings handler needs to push live
-// log-level changes into the logging subsystem without depending on its
-// concrete types. Satisfied by *logging.Sinks.
 type LogLevelSetter interface {
 	SetAppLevel(slog.Level)
 }
@@ -199,8 +191,6 @@ func registerAdminRoutes(r chi.Router, st *store.Store, w workerClient, hc *heal
 		writeJSON(w, http.StatusOK, buildDebugInfo())
 	})
 
-	// Lightweight health snapshot for the dashboard: external service
-	// reachability, missing-config warnings. Cached for ~30s in the checker.
 	r.Get("/status", func(rw http.ResponseWriter, r *http.Request) {
 		writeJSON(rw, http.StatusOK, hc.Snapshot(r.Context()))
 	})
@@ -238,9 +228,7 @@ func registerAdminRoutes(r chi.Router, st *store.Store, w workerClient, hc *heal
 		r.Get("/{id}/tags", listArrTags(st))
 		r.Get("/{id}/library", listArrLibrary(st))
 		r.Post("/{id}/library/queue", queueArrLibrary(st))
-		// Reveal endpoint: returns the auto-generated webhook secret so the user
-		// can copy it after saving. The user is the single admin and is already
-		// authenticated, so this is no weaker than the SQLite file itself.
+
 		r.Get("/{id}/webhook-secret", revealArrWebhookSecret(st))
 	})
 
@@ -281,8 +269,6 @@ func registerAdminRoutes(r chi.Router, st *store.Store, w workerClient, hc *heal
 	r.Post("/jobs/bulk-set-profile", bulkSetJobProfile(st))
 }
 
-// --- settings ---
-
 func getSettings(st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		m, err := st.GetAllSettings(r.Context())
@@ -290,9 +276,7 @@ func getSettings(st *store.Store) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		// Write-only secrets follow the same pattern as webhook_secret / qbit
-		// password / *arr api_key: strip from response, emit a boolean
-		// presence flag so the UI can show "(stored, leave blank to keep)".
+
 		if tok, ok := m["agent_token"]; ok {
 			delete(m, "agent_token")
 			if tok != "" {
@@ -337,10 +321,7 @@ func putSettings(st *store.Store, lls LogLevelSetter) http.HandlerFunc {
 			}
 			m["agent_url"] = strings.TrimRight(u, "/")
 		}
-		// Blank agent_token means "keep what's stored" — drop from the write
-		// set so we don't clobber. To explicitly clear, send a sentinel like
-		// "clear" (intentionally undocumented; user can clear via the UI's
-		// disable toggle which sets agent_enabled=false).
+
 		if v, ok := m["agent_token"]; ok && strings.TrimSpace(v) == "" {
 			delete(m, "agent_token")
 		}
@@ -401,9 +382,6 @@ func putSettings(st *store.Store, lls LogLevelSetter) http.HandlerFunc {
 	}
 }
 
-// normalizeBloatPolicy gates the small enum we accept on profile writes. Any
-// unknown value collapses to "off" so we don't store junk in the DB and so an
-// older client sending a value we removed in a future version stays harmless.
 func normalizeBloatPolicy(s string) string {
 	switch s {
 	case "keep_original", "retry_higher_crf":
@@ -413,10 +391,6 @@ func normalizeBloatPolicy(s string) string {
 	}
 }
 
-// clamp keeps a numeric setting inside a sensible range without rejecting the
-// whole request. Out-of-range values get pulled to the nearest bound rather
-// than triggering a 400; the user usually meant "as much / as little as
-// possible" anyway.
 func clamp(v, lo, hi int) int {
 	if v < lo {
 		return lo
@@ -427,11 +401,6 @@ func clamp(v, lo, hi int) int {
 	return v
 }
 
-// isValidOutputSuffix gates the output_suffix setting. We're strict on purpose:
-// the suffix becomes part of every filename Recodarr writes, so it can't contain
-// path separators, leading/trailing dots (which would create hidden files or
-// double-dot stems), or whitespace. Empty is rejected because the toggle is
-// independent — disable via output_suffix_enabled, not by blanking the value.
 func isValidOutputSuffix(s string) bool {
 	if len(s) == 0 || len(s) > 32 {
 		return false
@@ -460,8 +429,6 @@ func isValidHHMM(s string) bool {
 	}
 	return h >= 0 && h < 24 && m >= 0 && m < 60
 }
-
-// --- arr instance handlers ---
 
 func listArrInstances(st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -582,13 +549,11 @@ func listArrTags(st *store.Store) http.HandlerFunc {
 	}
 }
 
-// --- library backfill ---
-
 type libraryItemDTO struct {
-	ItemID      int64  `json:"itemId"` // seriesId / movieId
+	ItemID      int64  `json:"itemId"`
 	Title       string `json:"title"`
 	Path        string `json:"path"`
-	TagID       int64  `json:"tagId"` // first matching tag (ties resolved by mapping order)
+	TagID       int64  `json:"tagId"`
 	TagLabel    string `json:"tagLabel"`
 	ProfileID   int64  `json:"profileId"`
 	ProfileName string `json:"profileName"`
@@ -600,7 +565,7 @@ type libraryItemDTO struct {
 
 type libraryResponseDTO struct {
 	Items      []libraryItemDTO `json:"items"`
-	NoMappings bool             `json:"noMappings"` // true when this instance has no tag→profile mappings configured
+	NoMappings bool             `json:"noMappings"`
 }
 
 func listArrLibrary(st *store.Store) http.HandlerFunc {
@@ -630,9 +595,6 @@ func listArrLibrary(st *store.Store) http.HandlerFunc {
 			return
 		}
 
-		// Build tagID → first matching mapping. ListTagMappingsByKind returns
-		// rows in id order, so a tag carried by multiple mappings deterministically
-		// resolves to the oldest one — matches the webhook precedence.
 		mapByTagID := make(map[int64]store.TagMappingRow, len(mappings))
 		for _, mp := range mappings {
 			if _, exists := mapByTagID[mp.TagID]; !exists {
@@ -656,7 +618,7 @@ func listArrLibrary(st *store.Store) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
-		// Tag labels: the REST API returns tag IDs, but the SPA renders the label.
+
 		tags, err := client.Tags(r.Context())
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
@@ -717,7 +679,7 @@ type queueLibraryRequest struct {
 
 type queueLibraryResponse struct {
 	Inserted int      `json:"inserted"`
-	Skipped  int      `json:"skipped"` // duplicate or unprocessable files
+	Skipped  int      `json:"skipped"`
 	Errors   []string `json:"errors,omitempty"`
 }
 
@@ -747,9 +709,6 @@ func queueArrLibrary(st *store.Store) http.HandlerFunc {
 			return
 		}
 
-		// Re-derive the eligible set server-side: clients can only queue what
-		// the catalogue currently exposes. Defends against stale UI state
-		// trying to queue items whose tag was removed.
 		mappings, err := st.ListTagMappingsByKind(r.Context(), inst.Kind)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -805,12 +764,7 @@ func queueArrLibrary(st *store.Store) http.HandlerFunc {
 				resp.Errors = append(resp.Errors, fmt.Sprintf("item %d: list files: %v", pid, err))
 				continue
 			}
-			// Recover the qBit infohash from *arr's import history (once per
-			// parent — a series response covers all its episodes). Lets backfill
-			// jobs be seed-checked by hash like webhook jobs, which is the only
-			// reliable signal when the library lives on a filesystem (e.g. NFS)
-			// that doesn't report st_nlink. A failure here is non-fatal: jobs
-			// just fall back to the waiting_for_hardlink heuristic below.
+
 			imports, herr := client.ImportHistory(r.Context(), pid)
 			if herr != nil {
 				slog.Warn("backfill: import history lookup failed; falling back to hardlink wait",
@@ -824,11 +778,7 @@ func queueArrLibrary(st *store.Store) http.HandlerFunc {
 					resp.Errors = append(resp.Errors, fmt.Sprintf("file %s: %v", f.Path, err))
 					continue
 				}
-				// With a recovered hash the job is qBit-pollable (waiting_for_seed);
-				// without one we fall back to waiting_for_hardlink, which the worker
-				// releases once the library file has no remaining hardlinks. The
-				// hardlink heuristic is unreliable on NFS (st_nlink reads 1), so the
-				// history path is strongly preferred when available.
+
 				downloadID := arr.MatchImportDownloadID(imports, arr.Kind(inst.Kind), clean, f.RelativePath)
 				status := string(job.StatusWaitingForHardlink)
 				if downloadID != "" {
@@ -910,10 +860,6 @@ func testArrInstance(st *store.Store) http.HandlerFunc {
 	}
 }
 
-// --- tag profile handlers ---
-
-// --- qbit handlers ---
-
 func listQbitInstances(st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rows, err := st.ListQbitInstances(r.Context())
@@ -964,7 +910,6 @@ func deleteQbitInstance(st *store.Store) http.HandlerFunc {
 	}
 }
 
-// testQbitCredentials tests credentials supplied inline in the request body (no saved instance needed).
 func testQbitCredentials() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -1014,8 +959,6 @@ func testQbitInstance(st *store.Store) http.HandlerFunc {
 	}
 }
 
-// --- profiles ---
-
 func listProfiles(st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var (
@@ -1046,10 +989,7 @@ func upsertProfile(st *store.Store) http.HandlerFunc {
 			http.Error(w, "bad payload", http.StatusBadRequest)
 			return
 		}
-		// Re-encode the per-channel bitrate map to a compact JSON string for
-		// storage. Nil/empty becomes "{}" (the wire-default that says "use
-		// encoder defaults"). Invalid entries (non-positive bitrates) are
-		// silently dropped — they'd resolve to defaults anyway.
+
 		bitratesJSON := "{}"
 		if len(d.AudioBitratesByChannels) > 0 {
 			cleaned := make(map[string]int, len(d.AudioBitratesByChannels))
@@ -1112,8 +1052,6 @@ func deleteProfile(st *store.Store) http.HandlerFunc {
 	}
 }
 
-// --- all tags ---
-
 func listAllArrTags(st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		instances, err := st.ListArrInstances(r.Context())
@@ -1137,8 +1075,6 @@ func listAllArrTags(st *store.Store) http.HandlerFunc {
 		writeJSON(w, http.StatusOK, out)
 	}
 }
-
-// --- tag mappings ---
 
 func listTagMappingsHandler(st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -1192,8 +1128,6 @@ func deleteTagMappingHandler(st *store.Store) http.HandlerFunc {
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
-
-// --- debug ---
 
 type debugInfo struct {
 	HBVersion      string   `json:"hbVersion"`
@@ -1260,8 +1194,6 @@ func buildDebugInfo() debugInfo {
 	}
 }
 
-// --- worker ---
-
 func workerStatus(wk workerClient, st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ids := wk.EncodingJobIDs()
@@ -1278,7 +1210,7 @@ func workerStatus(wk workerClient, st *store.Store) http.HandlerFunc {
 		cfg, _ := st.LoadAppSettings(r.Context())
 		writeJSON(w, http.StatusOK, map[string]any{
 			"isEncoding":         len(ids) > 0,
-			"encodingJobId":      first, // back-compat: first in-flight job
+			"encodingJobId":      first,
 			"encodingJobIds":     ids,
 			"progress":           wk.AllProgress(),
 			"lastTickAt":         lastTick,
@@ -1289,9 +1221,6 @@ func workerStatus(wk workerClient, st *store.Store) http.HandlerFunc {
 	}
 }
 
-// workerSetPaused flips the master encoding-paused flag. When pausing, the
-// worker also cancels every in-flight encode and re-queues them. Body:
-// {"paused": true|false}. Response: {"paused": <bool>, "cancelled": <int>}.
 func workerSetPaused(wk workerClient) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -1313,11 +1242,8 @@ func workerSetPaused(wk workerClient) http.HandlerFunc {
 	}
 }
 
-var _ = context.Background // keep context imported for the workerClient interface
+var _ = context.Background
 
-// workerProgressSSE streams encode progress as Server-Sent Events. Sends an event whenever
-// the encoding worker reports new progress, plus a keepalive comment every 15s to keep the
-// connection open through proxies.
 func workerProgressSSE(wk workerClient) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		flusher, ok := w.(http.Flusher)
@@ -1328,9 +1254,8 @@ func workerProgressSSE(wk workerClient) http.HandlerFunc {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("X-Accel-Buffering", "no") // disable nginx proxy buffering
+		w.Header().Set("X-Accel-Buffering", "no")
 
-		// Chi's middleware.Timeout (30s default) would kill the stream — undo it for this handler.
 		ctx := r.Context()
 
 		send := func(ev job.ProgressEvent) {
@@ -1341,7 +1266,6 @@ func workerProgressSSE(wk workerClient) http.HandlerFunc {
 			flusher.Flush()
 		}
 
-		// Send the current state immediately so the client doesn't wait for the next change.
 		if cur := wk.CurrentProgress(); cur.JobID != 0 {
 			send(cur)
 		} else {
@@ -1376,8 +1300,6 @@ func workerProgressSSE(wk workerClient) http.HandlerFunc {
 		}
 	}
 }
-
-// --- jobs ---
 
 type jobDTO struct {
 	ID            int64   `json:"id"`
@@ -1441,9 +1363,6 @@ func rowToJobDTO(row store.JobRow) jobDTO {
 	return d
 }
 
-// splitNonEmpty splits a comma-separated query-param value into a clean
-// list, dropping empty fragments. Returns nil for "" so the caller can use
-// len(...) == 0 to mean "no filter".
 func splitNonEmpty(s string) []string {
 	if s == "" {
 		return nil
@@ -1565,9 +1484,6 @@ func cancelJob(st *store.Store, wk workerClient) http.HandlerFunc {
 	}
 }
 
-// jobDebugDTO bundles the per-job diagnostics the UI needs to figure out why a
-// job is stuck — particularly why a waiting_for_seed job hasn't transitioned.
-// Everything here is read-only and computed live; nothing is persisted.
 type jobDebugDTO struct {
 	JobID            int64              `json:"jobId"`
 	Status           string             `json:"status"`
@@ -1582,9 +1498,6 @@ type jobDebugDTO struct {
 	Encode           *jobDebugEncodeDTO `json:"encode,omitempty"`
 }
 
-// jobDebugEncodeDTO carries post-encode info for terminal jobs (done/failed/
-// skipped). Populated whenever original_size/final_size or an error/skip
-// reason exists on the row.
 type jobDebugEncodeDTO struct {
 	ProfileID       *int64   `json:"profileId,omitempty"`
 	ProfileName     string   `json:"profileName,omitempty"`
@@ -1645,10 +1558,6 @@ func debugJob(st *store.Store) http.HandlerFunc {
 			out.WaitingForSeed = stats.WaitingForSeed
 		}
 
-		// Encode info: surfaced whenever the job has been worked at least
-		// once. The dialog already displays the qBit block; this gives the
-		// "what actually happened" half once the job has reached a terminal
-		// (or in-progress) state.
 		if row.StartedAt.Valid || row.OriginalSize.Valid || row.FinalSize.Valid ||
 			row.Error != "" || row.RefreshError != "" {
 			enc := &jobDebugEncodeDTO{
@@ -1693,9 +1602,6 @@ func debugJob(st *store.Store) http.HandlerFunc {
 			out.Encode = enc
 		}
 
-		// waiting_for_hardlink is a backfill-only state with no qBit involvement:
-		// the worker releases it to 'ready' once the library file has no other
-		// hardlinks. Report the live link count so a stuck job is explainable.
 		if row.Status == string(job.StatusWaitingForHardlink) {
 			if n, err := job.HardlinkCount(row.FilePath); err != nil {
 				out.StalledReason = fmt.Sprintf("Can't stat the library file (%v). The worker will release this job to 'ready' on the next tick so the encode surfaces the error.", err)
@@ -1789,9 +1695,6 @@ func deleteJob(st *store.Store) http.HandlerFunc {
 
 func deleteTerminalJobs(st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Optional ?status=done,failed,skipped — empty/missing keeps the old
-		// default of {done, failed, skipped}. Unknown values are dropped by
-		// the store layer.
 		statuses := splitNonEmpty(r.URL.Query().Get("status"))
 		n, err := st.DeleteTerminalJobs(r.Context(), statuses)
 		if err != nil {
@@ -1838,8 +1741,6 @@ func bulkRetryJobs(st *store.Store) http.HandlerFunc {
 	}
 }
 
-// bulkSetJobProfile reassigns profile_id on the listed jobs. Pass profileId=0
-// (or omit) to clear. In-flight encodes are skipped server-side.
 func bulkSetJobProfile(st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -1863,16 +1764,13 @@ func bulkSetJobProfile(st *store.Store) http.HandlerFunc {
 	}
 }
 
-// testAgent dials the configured remote agent server-side so the SPA never
-// has to handle the bearer token. Accepts an optional inline payload to test
-// values the user hasn't saved yet (typical "Test connection" UX).
 func testAgent(st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			URL   string `json:"url"`
 			Token string `json:"token"`
 		}
-		_ = json.NewDecoder(r.Body).Decode(&body) // empty body is fine; fall back to stored
+		_ = json.NewDecoder(r.Body).Decode(&body)
 
 		url := strings.TrimSpace(body.URL)
 		token := body.Token

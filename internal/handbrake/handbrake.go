@@ -16,7 +16,6 @@ import (
 	"time"
 )
 
-// EncoderCaps holds discovered capabilities for a single encoder.
 type EncoderCaps struct {
 	Name     string   `json:"name"`
 	Presets  []string `json:"presets"`
@@ -25,7 +24,6 @@ type EncoderCaps struct {
 	Levels   []string `json:"levels"`
 }
 
-// Caps holds all capabilities discovered from the HandBrakeCLI binary.
 type Caps struct {
 	Encoders []EncoderCaps `json:"encoders"`
 }
@@ -38,19 +36,13 @@ var (
 	versionVal  string
 )
 
-// QueryCaps discovers HandBrakeCLI capabilities once and caches the result.
 func QueryCaps() Caps {
 	capsOnce.Do(func() { capsVal = discoverCaps() })
 	return capsVal
 }
 
-// VersionString returns the output of HandBrakeCLI --version, or an error message
-// if not found. Cached after the first call — the binary on PATH doesn't change
-// at runtime, and this is called from per-scrape metric collection and per-tick
-// health probes.
 func VersionString() string {
 	versionOnce.Do(func() {
-		// stdout only — stderr carries libhb init noise (nvenc/qsv probes, thread starts).
 		out, err := exec.Command("HandBrakeCLI", "--version").Output()
 		v := strings.TrimSpace(string(out))
 		if err != nil && v == "" {
@@ -65,50 +57,37 @@ func VersionString() string {
 	return versionVal
 }
 
-// Settings describes an encode job in terms of HandBrakeCLI flags.
 type Settings struct {
 	Encoder        string
 	EncoderPreset  string
 	EncoderProfile string
 	EncoderTune    string
 	EncoderLevel   string
-	// RateControl picks the bitrate model: "crf" (default) for constant
-	// quality (uses Quality), or "abr" for average bitrate (uses VideoBitrate).
+
 	RateControl  string
 	Quality      int
-	VideoBitrate int // kbps; only used when RateControl="abr"
+	VideoBitrate int
 	MaxWidth     int
 	MaxHeight    int
-	AudioEncoder string // "copy", "av_aac", "mp3", etc.; "" = HandBrake default
-	AudioBitrate int    // kbps; 0 = auto. Ignored when AudioBitratesPerTrack is set.
-	AudioMixdown string // "stereo", "5point1", etc.; "" = keep source
-	// AudioBitratesPerTrack, when non-empty, sets a different bitrate per
-	// output track (one entry per input audio stream, in order). Used by the
-	// worker when AudioMixdown is empty so each track is re-encoded at a
-	// bitrate appropriate to its channel count. Passed to HandBrake as a
-	// comma-separated --ab list. Overrides AudioBitrate when set.
+	AudioEncoder string
+	AudioBitrate int
+	AudioMixdown string
+
 	AudioBitratesPerTrack []int
 	SubtitleCopy          bool
 	TwoPass               bool
-	ContainerFormat       string // mkv (default) or mp4
-	ExtraArgs             string // raw HandBrakeCLI flags appended verbatim
-	Framerate             string // e.g. "30", "24000/1001"; empty = source
-	NoCommit              bool   // when true, the encoded file is left at TempPath instead of
-	// being renamed over the input. Callers use Commit or DiscardTemp to finalize. Used by
-	// the worker's size-guard policies, which want to compare new vs. original before
-	// destroying the source.
+	ContainerFormat       string
+	ExtraArgs             string
+	Framerate             string
+	NoCommit              bool
 }
 
-// Progress is a single progress observation parsed from HandBrakeCLI's stdout.
 type Progress struct {
-	Percent float64 // 0–100
+	Percent float64
 	FPS     float64
-	ETA     string // e.g. "00h05m12s", empty if unknown
+	ETA     string
 }
 
-// HandBrakeCLI prints progress lines like:
-//
-//	Encoding: task 1 of 1, 12.34 % (45.67 fps, avg 50.00 fps, ETA 00h05m12s)
 var progressRe = regexp.MustCompile(`(\d+\.\d+)\s*%(?:\s*\(\s*(\d+\.\d+)\s*fps[^)]*?ETA\s+([0-9hms]+))?`)
 
 func parseProgressLine(line string) (Progress, bool) {
@@ -133,27 +112,18 @@ func parseProgressLine(line string) (Progress, bool) {
 	return p, true
 }
 
-// RunResult holds the outcome of a successful encode.
 type RunResult struct {
 	FinalSize int64
-	TempPath  string // populated when Settings.NoCommit was true; the encoded file's
-	// uncommitted location. Caller must Commit it or DiscardTemp it.
-	Log string // captured combined output (always populated)
+	TempPath  string
+
+	Log string
 }
 
-// LineSink is an optional destination for HandBrakeCLI's raw stdout/stderr.
-// Callers usually point this at handbrake.log via the logging package; nil
-// (or io.Discard) drops the verbose output. The captured-for-error buffer is
-// independent and always populated.
 type LineSink struct {
 	Stdout io.Writer
 	Stderr io.Writer
 }
 
-// Run encodes input to a temp file in the same directory and atomically renames over input on success.
-// Combined stdout+stderr is always captured into the returned RunResult.Log for the failure path;
-// raw line-by-line output additionally goes to sink (if non-nil) so the caller can route it to a file.
-// onProgress, if non-nil, is called for each parsed progress line — keep it cheap and non-blocking.
 func Run(ctx context.Context, input string, s Settings, sink *LineSink, onProgress func(Progress)) (RunResult, error) {
 	if strings.EqualFold(s.RateControl, "abr") && s.VideoBitrate <= 0 {
 		return RunResult{}, fmt.Errorf("profile uses ABR rate control but video bitrate is 0 — set a bitrate in the profile")
@@ -188,7 +158,7 @@ func Run(ctx context.Context, input string, s Settings, sink *LineSink, onProgre
 
 	pump := func(r io.Reader, mirror io.Writer, parseProgress bool, done chan<- struct{}) {
 		defer close(done)
-		// HandBrake updates progress with carriage returns on the same line; split on either \n or \r.
+
 		scanner := bufio.NewScanner(r)
 		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		scanner.Split(splitOnCRorLF)
@@ -224,9 +194,7 @@ func Run(ctx context.Context, input string, s Settings, sink *LineSink, onProgre
 	<-errDone
 	waitErr := cmd.Wait()
 	logText := buf.String()
-	// HandBrakeCLI exits 0 even on failed encodes — the real outcome is in
-	// `libhb: work result = N` on stdout. Without checking we'd rename a
-	// 0-byte temp over the source.
+
 	if waitErr != nil {
 		_ = os.Remove(tmp)
 		return RunResult{Log: logText}, fmt.Errorf("HandBrakeCLI: %w", waitErr)
@@ -246,7 +214,6 @@ func Run(ctx context.Context, input string, s Settings, sink *LineSink, onProgre
 		return RunResult{Log: logText}, fmt.Errorf("stat tmp: %w", err)
 	}
 	if s.NoCommit {
-		// Leave the temp file in place; caller decides what to do with it.
 		return RunResult{FinalSize: stat.Size(), TempPath: tmp, Log: logText}, nil
 	}
 	if err := os.Rename(tmp, input); err != nil {
@@ -277,10 +244,6 @@ func parseWorkResult(log string) (int, bool) {
 	return n, true
 }
 
-// Commit atomically renames a temp file produced with Settings.NoCommit over the
-// original input path. Use this once the caller has decided the encode is good
-// to keep. On the same filesystem (which the temp always is — same dir as input),
-// rename is atomic.
 func Commit(tempPath, finalPath string) error {
 	if err := os.Rename(tempPath, finalPath); err != nil {
 		_ = os.Remove(tempPath)
@@ -289,15 +252,10 @@ func Commit(tempPath, finalPath string) error {
 	return nil
 }
 
-// DiscardTemp removes a temp file produced with Settings.NoCommit. Errors are
-// swallowed because there's nothing useful the caller can do with them — the
-// encode already succeeded, this is just cleanup of a file we chose not to keep.
 func DiscardTemp(tempPath string) {
 	_ = os.Remove(tempPath)
 }
 
-// splitOnCRorLF is a bufio.SplitFunc that breaks on \r or \n so we capture HandBrake's
-// in-place progress updates (which use \r) as separate "lines".
 func splitOnCRorLF(data []byte, atEOF bool) (advance int, token []byte, err error) {
 	for i, b := range data {
 		if b == '\n' || b == '\r' {
@@ -327,10 +285,7 @@ func buildArgs(input, output string, s Settings) []string {
 		"-i", input,
 		"-o", output,
 	}
-	// Rate control. CRF emits -q; ABR emits --vb. Mutually exclusive — HandBrake
-	// errors if both are present. ABR with no bitrate set would silently fall
-	// back to CRF — guard against that explicitly upstream (Run returns an
-	// error before getting here).
+
 	if strings.EqualFold(s.RateControl, "abr") {
 		args = append(args, "--vb", strconv.Itoa(s.VideoBitrate))
 	} else {
@@ -361,9 +316,6 @@ func buildArgs(input, output string, s Settings) []string {
 	if s.AudioEncoder != "" {
 		args = append(args, "--all-audio", "--aencoder", s.AudioEncoder)
 		if s.AudioEncoder != "copy" {
-			// Per-track wins: keep-source-layout mode hands us a bitrate per
-			// input audio stream so 5.1 doesn't get starved at the same value
-			// as stereo. Falls back to a flat --ab otherwise.
 			if len(s.AudioBitratesPerTrack) > 0 {
 				parts := make([]string, len(s.AudioBitratesPerTrack))
 				for i, b := range s.AudioBitratesPerTrack {
@@ -384,24 +336,20 @@ func buildArgs(input, output string, s Settings) []string {
 	if s.TwoPass {
 		args = append(args, "--two-pass", "--turbo")
 	}
-	// Auto-enable matching hardware decoder so the GPU does both decode and encode
-	// (zero-copy pipeline). HandBrake silently falls back to software decode if the
-	// input codec isn't supported by the chosen NVDEC/QSV/VAAPI backend, so this is
-	// safe to always do when the encoder is hardware.
+
 	switch {
 	case strings.HasPrefix(encoder, "nvenc_"):
 		args = append(args, "--enable-hw-decoding", "nvdec")
 	case strings.HasPrefix(encoder, "qsv_"):
 		args = append(args, "--enable-hw-decoding", "qsv")
 	case strings.HasPrefix(encoder, "vce_") || strings.HasPrefix(encoder, "vt_"):
-		// AMD VCE on Linux goes through VAAPI; Apple VideoToolbox is its own thing
-		// but HandBrake exposes it via the same flag.
+
 		args = append(args, "--enable-hw-decoding", "vaapi")
 	}
 	if s.Framerate != "" {
 		args = append(args, "-r", s.Framerate)
 	}
-	// Always CFR — VFR/PFR cause sync drift in some players and we don't ship those modes.
+
 	args = append(args, "--cfr")
 	if s.ExtraArgs != "" {
 		args = append(args, splitShellArgs(s.ExtraArgs)...)
@@ -409,11 +357,7 @@ func buildArgs(input, output string, s Settings) []string {
 	return args
 }
 
-// knownVideoEncoders is the complete set of HandBrake video encoder identifiers across all
-// builds and platforms. We probe each one with --encoder-preset-list to find which are
-// compiled into the installed binary; HandBrakeCLI has no --encoder-list flag.
 var knownVideoEncoders = []string{
-	// Software
 	"x264", "x264_10bit",
 	"x265", "x265_10bit", "x265_12bit",
 	"svt_av1", "svt_av1_10bit",
@@ -421,31 +365,25 @@ var knownVideoEncoders = []string{
 	"VP8", "VP9", "VP9_10bit",
 	"theora",
 	"ffv1",
-	// NVIDIA NVENC
+
 	"nvenc_h264",
 	"nvenc_h265", "nvenc_h265_10bit",
 	"nvenc_av1", "nvenc_av1_10bit",
-	// Intel QSV
+
 	"qsv_h264",
 	"qsv_h265", "qsv_h265_10bit",
 	"qsv_av1", "qsv_av1_10bit",
-	// AMD VCE
+
 	"vce_h264",
 	"vce_h265", "vce_h265_10bit",
 	"vce_av1",
-	// Apple VideoToolbox
+
 	"vt_h264",
 	"vt_h265", "vt_h265_10bit",
-	// Windows Media Foundation
+
 	"mf_h264", "mf_h265",
 }
 
-// discoverCaps walks the static Catalog and keeps only the encoders that the installed
-// HandBrakeCLI binary actually has compiled in. We probe availability by running
-// `HandBrakeCLI --encoder-preset-list <name>` and looking at the exit code only — exit 0
-// means the encoder exists, non-zero means it isn't compiled in. We never parse the output
-// (HandBrakeCLI's list-flag output is human-formatted and unstable across versions); the
-// canonical preset/tune/profile/level lists come from Catalog.
 func discoverCaps() Caps {
 	const concurrency = 6
 	sem := make(chan struct{}, concurrency)
@@ -469,7 +407,7 @@ func discoverCaps() Caps {
 	wg.Wait()
 
 	encoders := make([]EncoderCaps, 0, len(available))
-	for _, enc := range knownVideoEncoders { // preserve declaration order
+	for _, enc := range knownVideoEncoders {
 		if !available[enc] {
 			continue
 		}
@@ -482,9 +420,6 @@ func discoverCaps() Caps {
 	return Caps{Encoders: encoders}
 }
 
-// isEncoderAvailable returns true if HandBrakeCLI accepts this encoder name. We run the
-// cheapest list flag and only check the exit code (output is discarded). 5s timeout per
-// probe prevents a hung subprocess from blocking startup.
 func isEncoderAvailable(enc string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

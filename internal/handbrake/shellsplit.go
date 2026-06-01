@@ -2,19 +2,12 @@ package handbrake
 
 import "strings"
 
-// splitShellArgs tokenizes a shell-style argument string the way a POSIX shell would for a
-// simple command line: whitespace separates tokens; single quotes are literal; double quotes
-// allow backslash escapes; bare backslashes escape the next character. Unterminated quotes
-// are tolerated (the trailing partial token is emitted as-is).
-//
-// Used for the user's free-text "Extra HandBrake args" profile field. Plain strings.Fields
-// would shatter `--audio-name "5.1 Surround"` into three tokens.
 func splitShellArgs(s string) []string {
 	var (
-		out                   []string
-		cur                   strings.Builder
-		inSingle, inDouble    bool
-		hasToken              bool
+		out                []string
+		cur                strings.Builder
+		inSingle, inDouble bool
+		hasToken           bool
 	)
 	flush := func() {
 		if hasToken {

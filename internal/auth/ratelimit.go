@@ -5,14 +5,6 @@ import (
 	"time"
 )
 
-// LoginLimiter is an in-memory failed-login throttle keyed by client IP. After a
-// few failures it makes the caller wait, with the wait growing exponentially.
-// Successful logins reset the counter for that key.
-//
-// Single-admin app, single process: in-memory is fine, no need for Redis.
-//
-// The map is bounded (maxEntries) and expired entries are swept opportunistically
-// on writes so an attacker spraying random IPs can't grow it without bound.
 type LoginLimiter struct {
 	mu      sync.Mutex
 	entries map[string]*loginEntry
@@ -24,12 +16,8 @@ type loginEntry struct {
 }
 
 const (
-	// maxEntries caps tracked client IPs. Reaching the cap drops the oldest
-	// (lowest nextOK) entry to make room.
 	maxEntries = 4096
-	// retentionAfterReady is how long an entry sticks around once its backoff
-	// expires. Long enough to keep the failure count meaningful for a returning
-	// attacker, short enough to bound memory.
+
 	retentionAfterReady = 1 * time.Hour
 )
 
@@ -37,8 +25,6 @@ func NewLoginLimiter() *LoginLimiter {
 	return &LoginLimiter{entries: make(map[string]*loginEntry)}
 }
 
-// Allow reports whether a login attempt from key is permitted right now, and
-// returns the time until the next attempt would be allowed (zero if allowed).
 func (l *LoginLimiter) Allow(key string) (bool, time.Duration) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -52,8 +38,6 @@ func (l *LoginLimiter) Allow(key string) (bool, time.Duration) {
 	return true, 0
 }
 
-// RegisterFailure records a failed attempt and schedules the next allowed time.
-// Backoff: 0,0,0,2s,4s,8s,16s,30s,60s,120s capped at 300s.
 func (l *LoginLimiter) RegisterFailure(key string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -70,8 +54,6 @@ func (l *LoginLimiter) RegisterFailure(key string) {
 	e.nextOK = time.Now().Add(backoffFor(e.failures))
 }
 
-// sweepLocked drops entries whose backoff expired more than retentionAfterReady ago.
-// Cheap O(n) walk run only on insert, so amortized fine.
 func (l *LoginLimiter) sweepLocked() {
 	cutoff := time.Now().Add(-retentionAfterReady)
 	for k, e := range l.entries {
@@ -81,8 +63,6 @@ func (l *LoginLimiter) sweepLocked() {
 	}
 }
 
-// evictOldestLocked removes the entry with the smallest nextOK. Called only when
-// the map hits maxEntries after a sweep, i.e. a sustained spoofed-IP flood.
 func (l *LoginLimiter) evictOldestLocked() {
 	var oldestKey string
 	var oldest time.Time
@@ -99,7 +79,6 @@ func (l *LoginLimiter) evictOldestLocked() {
 	}
 }
 
-// Reset clears the throttle for key (call on successful login).
 func (l *LoginLimiter) Reset(key string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()

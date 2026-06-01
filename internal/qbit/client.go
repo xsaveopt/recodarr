@@ -13,10 +13,6 @@ import (
 	"time"
 )
 
-// HTTPTransport is the http.RoundTripper used by every qBit client created
-// after this is set. Defaults to http.DefaultTransport. The logging package
-// swaps this for an outbound-logging wrapper at startup so qBit calls land
-// in outbound.log instead of stdout.
 var HTTPTransport http.RoundTripper = http.DefaultTransport
 
 type Client struct {
@@ -47,11 +43,7 @@ func (c *Client) Login(ctx context.Context) error {
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("User-Agent", "Recodarr")
-	// Intentionally do NOT set Origin/Referer. qBit's CSRF check (see isCrossSiteRequest
-	// in webapplication.cpp) treats requests with neither header as same-origin and lets
-	// them through; setting Origin triggers a strict host-equality check that fails on
-	// any reverse-proxy / port-forward / hostname-vs-IP mismatch. Sonarr and Radarr
-	// rely on the same omission.
+
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return err
@@ -60,19 +52,11 @@ func (c *Client) Login(ctx context.Context) error {
 	body, _ := io.ReadAll(resp.Body)
 	trimmed := strings.TrimSpace(string(body))
 
-	// Decide success first, then warn-and-return-error only on actual failures.
-	// Previously the warn fired on any "abnormal" response shape — including
-	// 204 No Content, which qBit returns when the client IP is in the
-	// "Bypass authentication for whitelisted subnets" list and is actually a
-	// success path. That made the log scream every poll while the test
-	// endpoint reported OK.
 	var loginErr error
 	switch {
-	// Explicit failure: qBit returned 200 with the literal "Fails." body.
 	case resp.StatusCode == http.StatusOK && trimmed == "Fails.":
 		loginErr = fmt.Errorf("qbit rejected credentials (wrong username or password)")
-	// Any 2xx is success. 200 + "Ok." is the normal login response; 204 No
-	// Content is the IP-whitelist bypass.
+
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		return nil
 	case resp.StatusCode == http.StatusForbidden:
@@ -82,9 +66,7 @@ func (c *Client) Login(ctx context.Context) error {
 	default:
 		loginErr = fmt.Errorf("qbit login failed: status=%d body=%q", resp.StatusCode, trimmed)
 	}
-	// Loud diagnostic so we can tell apart CSRF vs. host-validation vs. wrong
-	// creds vs. ban. Includes the actual Host header Go sent and qBit's full
-	// response.
+
 	slog.Warn("qbit login failed",
 		"url", req.URL.String(),
 		"hostHeader", req.Host,
@@ -95,7 +77,6 @@ func (c *Client) Login(ctx context.Context) error {
 	return loginErr
 }
 
-// flattenHeaders serializes response headers as a single string for logging.
 func flattenHeaders(h http.Header) string {
 	var sb strings.Builder
 	for k, vs := range h {
@@ -111,8 +92,6 @@ func flattenHeaders(h http.Header) string {
 	return sb.String()
 }
 
-// hostOnly strips scheme and port from a URL, leaving just the host part.
-// Used to suggest the value qBit's "Server domains" field needs.
 func hostOnly(rawURL string) string {
 	u, err := url.Parse(rawURL)
 	if err != nil || u.Hostname() == "" {
@@ -130,7 +109,6 @@ type Torrent struct {
 	SavePath string  `json:"save_path"`
 }
 
-// TorrentByHash returns the torrent if it exists in qBit, or (nil, nil) if it's gone.
 func (c *Client) TorrentByHash(ctx context.Context, hash string) (*Torrent, error) {
 	got, err := c.TorrentsByHashes(ctx, []string{hash})
 	if err != nil {
@@ -142,9 +120,6 @@ func (c *Client) TorrentByHash(ctx context.Context, hash string) (*Torrent, erro
 	return nil, nil
 }
 
-// TorrentsByHashes batches a single /torrents/info call for any number of
-// hashes. The result is keyed by lowercase hash so callers can spot which
-// queried hashes are missing from qBit.
 func (c *Client) TorrentsByHashes(ctx context.Context, hashes []string) (map[string]Torrent, error) {
 	if len(hashes) == 0 {
 		return map[string]Torrent{}, nil

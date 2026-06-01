@@ -7,10 +7,6 @@ import (
 	"strings"
 )
 
-// spaHandler serves files from the embedded SPA bundle.
-// Falls back to index.html for any path without a matching asset, so the Vue router can take over.
-// Unknown /api/* and /webhook/* paths return 404 instead of the SPA shell — otherwise a typo'd
-// API call would land on index.html with HTTP 200, which is invisible to clients.
 func spaHandler(assets fs.FS) http.Handler {
 	fileServer := http.FileServer(http.FS(assets))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

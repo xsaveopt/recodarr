@@ -33,7 +33,6 @@ function loadCachedTests() {
     const raw = localStorage.getItem(TEST_LS_KEY);
     if (raw) testResults.value = JSON.parse(raw);
   } catch {
-    /* ignore */
   }
 }
 
@@ -41,7 +40,6 @@ function persistTests() {
   try {
     localStorage.setItem(TEST_LS_KEY, JSON.stringify(testResults.value));
   } catch {
-    /* ignore */
   }
 }
 
@@ -66,7 +64,6 @@ function startCreate() {
 
 function startEdit(row: ArrInstance) {
   validationError.value = null;
-  // Strip secrets from the editing copy — they were never sent. Blank means "keep".
   editing.value = { ...row, apiKey: "", webhookSecret: "" };
 }
 
@@ -96,8 +93,6 @@ async function save() {
     notify.success(`Saved ${e.name}`);
     editing.value = null;
     await load();
-    // After a fresh create, auto-pop the connect dialog so the user can grab
-    // the auto-generated webhook secret right away.
     if (isCreate && saved.id) {
       await openConnect({ ...(saved as ArrInstance) });
     }
@@ -140,7 +135,6 @@ function webhookURL(row: ArrInstance) {
   return `${window.location.origin}/webhook/${row.kind}/${row.id}`;
 }
 
-// "Connect" dialog: shows the webhook URL + Basic-auth username/password.
 const connectFor = ref<ArrInstance | null>(null);
 const connectUser = ref<string>("");
 const connectPass = ref<string>("");
@@ -400,7 +394,7 @@ onMounted(() => {
   font-size: 0.85rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   word-break: break-all;
-  user-select: all; /* one click selects the whole value */
+  user-select: all;
   cursor: text;
 }
 .test-ok {
