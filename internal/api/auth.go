@@ -7,11 +7,11 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/sratabix/recodarr/internal/auth"
 )
 
-// loginLimiter is process-wide. Single-admin app, single process — fine.
 var loginLimiter = auth.NewLoginLimiter()
 
 func registerAuthRoutes(r chi.Router, a *auth.Store) {
@@ -122,9 +122,10 @@ func authLogout(a *auth.Store) http.HandlerFunc {
 	}
 }
 
-// clientIP returns the request's client IP. chi's RealIP middleware has already
-// set r.RemoteAddr from X-Forwarded-For when configured; strip the port.
 func clientIP(r *http.Request) string {
+	if ip := middleware.GetClientIP(r.Context()); ip != "" {
+		return ip
+	}
 	addr := r.RemoteAddr
 	for i := len(addr) - 1; i >= 0; i-- {
 		if addr[i] == ':' {
