@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -22,14 +23,15 @@ import (
 const AgentVersion = "1"
 
 type Server struct {
-	store  *Store
-	runner *Runner
-	token  string
-	hbFor  func(jobID int64) io.Writer
+	store   *Store
+	runner  *Runner
+	token   string
+	localFS bool
+	hbFor   func(jobID int64) io.Writer
 }
 
-func NewServer(store *Store, runner *Runner, token string, hbFor func(jobID int64) io.Writer) *Server {
-	return &Server{store: store, runner: runner, token: token, hbFor: hbFor}
+func NewServer(store *Store, runner *Runner, token string, localFS bool, hbFor func(jobID int64) io.Writer) *Server {
+	return &Server{store: store, runner: runner, token: token, localFS: localFS, hbFor: hbFor}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -81,6 +83,7 @@ func (s *Server) healthz(w http.ResponseWriter, _ *http.Request) {
 		SlotsUsed:        len(s.runner.active),
 		JobsActive:       active,
 		DiskFreeBytes:    free,
+		LocalFS:          s.localFS,
 	})
 }
 
@@ -102,16 +105,54 @@ func (s *Server) createJob(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "outputContainer must be 'mkv' or 'mp4'")
 		return
 	}
-	js, err := s.store.Create(req)
+
+	localSource := s.canEncodeInPlace(req)
+
+	js, err := s.store.Create(req, localSource)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	slog.Info("agent: job created", "id", js.ID, "filename", req.Filename, "size", req.SizeBytes)
-	writeJSON(w, http.StatusCreated, JobCreateResponse{
-		JobID:     js.ID,
-		UploadURL: fmt.Sprintf("%s/jobs/%s/source", PathPrefix, js.ID),
-	})
+	slog.Info("agent: job created", "id", js.ID, "filename", req.Filename, "size", req.SizeBytes, "localSource", localSource)
+	resp := JobCreateResponse{
+		JobID:       js.ID,
+		LocalSource: localSource,
+	}
+	if !localSource {
+		resp.UploadURL = fmt.Sprintf("%s/jobs/%s/source", PathPrefix, js.ID)
+	}
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+func (s *Server) canEncodeInPlace(req JobRequest) bool {
+	if !s.localFS || req.SourcePath == "" || req.SourceHash == "" {
+		return false
+	}
+	if !filepath.IsAbs(req.SourcePath) || strings.ContainsRune(req.SourcePath, 0) ||
+		filepath.Clean(req.SourcePath) != req.SourcePath {
+		slog.Warn("agent: local-fs source path rejected", "path", req.SourcePath)
+		return false
+	}
+	info, err := os.Stat(req.SourcePath)
+	if err != nil || info.IsDir() {
+		slog.Info("agent: local-fs miss, file not present locally", "path", req.SourcePath)
+		return false
+	}
+	if info.Size() != req.SizeBytes {
+		slog.Info("agent: local-fs miss, size mismatch", "path", req.SourcePath, "local", info.Size(), "remote", req.SizeBytes)
+		return false
+	}
+	got, err := HashFile(req.SourcePath)
+	if err != nil {
+		slog.Warn("agent: local-fs hash failed", "path", req.SourcePath, "err", err)
+		return false
+	}
+	if got != req.SourceHash {
+		slog.Info("agent: local-fs miss, hash mismatch", "path", req.SourcePath)
+		return false
+	}
+	slog.Info("agent: encoding in place from shared filesystem", "path", req.SourcePath)
+	return true
 }
 
 func (s *Server) uploadSource(w http.ResponseWriter, r *http.Request) {

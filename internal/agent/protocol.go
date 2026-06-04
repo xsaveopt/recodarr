@@ -31,11 +31,17 @@ type JobRequest struct {
 	Settings handbrake.Settings `json:"settings"`
 
 	OutputContainer string `json:"outputContainer"`
+
+	SourcePath string `json:"sourcePath,omitempty"`
+
+	SourceHash string `json:"sourceHash,omitempty"`
 }
 
 type JobCreateResponse struct {
 	JobID     string `json:"jobId"`
 	UploadURL string `json:"uploadUrl"`
+
+	LocalSource bool `json:"localSource,omitempty"`
 }
 
 type JobStateSnapshot struct {
@@ -49,6 +55,9 @@ type JobStateSnapshot struct {
 	OutputSizeBytes int64                `json:"outputSizeBytes,omitempty"`
 	Request         *JobRequest          `json:"request,omitempty"`
 	Result          *handbrake.RunResult `json:"-"`
+
+	LocalSource     bool   `json:"localSource,omitempty"`
+	LocalOutputPath string `json:"localOutputPath,omitempty"`
 }
 
 type ProgressPayload struct {
@@ -69,6 +78,7 @@ type HealthSnapshot struct {
 	SlotsMax         int    `json:"slotsMax"`
 	JobsActive       int    `json:"jobsActive"`
 	DiskFreeBytes    uint64 `json:"diskFreeBytes"`
+	LocalFS          bool   `json:"localFs"`
 }
 
 type ErrorResponse struct {

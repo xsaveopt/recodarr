@@ -67,16 +67,21 @@ func (s *Store) scan() error {
 
 func (s *Store) Root() string { return s.root }
 
-func (s *Store) Create(req JobRequest) (*JobStateSnapshot, error) {
+func (s *Store) Create(req JobRequest, localSource bool) (*JobStateSnapshot, error) {
 	id := uuid.NewString()
 	if err := os.MkdirAll(s.JobDir(id), 0o755); err != nil {
 		return nil, fmt.Errorf("create job dir: %w", err)
 	}
+	state := StateAwaitingSource
+	if localSource {
+		state = StateQueued
+	}
 	js := &JobStateSnapshot{
-		ID:        id,
-		State:     StateAwaitingSource,
-		CreatedAt: time.Now(),
-		Request:   &req,
+		ID:          id,
+		State:       state,
+		CreatedAt:   time.Now(),
+		Request:     &req,
+		LocalSource: localSource,
 	}
 	if err := s.writeManifest(js); err != nil {
 		_ = os.RemoveAll(s.JobDir(id))

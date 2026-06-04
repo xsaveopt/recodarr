@@ -21,6 +21,7 @@ import (
 type Client struct {
 	baseURL string
 	token   string
+	localFS bool
 	http    *http.Client
 }
 
@@ -31,6 +32,8 @@ func NewClient(baseURL, token string) *Client {
 		http:    &http.Client{},
 	}
 }
+
+func (c *Client) SetLocalFS(v bool) { c.localFS = v }
 
 func (c *Client) Ping(ctx context.Context) (*HealthSnapshot, error) {
 	req, err := c.newRequest(ctx, http.MethodGet, "/healthz", nil)
@@ -68,6 +71,16 @@ func (c *Client) Encode(
 		Settings:        s,
 		OutputContainer: containerFor(sourcePath, s),
 	}
+	if c.localFS {
+		if abs, err := filepath.Abs(sourcePath); err == nil {
+			if hash, err := HashFile(abs); err == nil {
+				req.SourcePath = abs
+				req.SourceHash = hash
+			} else {
+				slog.Warn("agent: hashing source for in-place check failed, will upload", "path", abs, "err", err)
+			}
+		}
+	}
 
 	created, err := c.createJob(ctx, req)
 	if err != nil {
@@ -83,6 +96,10 @@ func (c *Client) Encode(
 		defer cancel()
 		_ = c.Delete(dctx, created.JobID)
 	}()
+
+	if created.LocalSource {
+		return c.encodeInPlace(ctx, created.JobID, onProgress, &cleanup)
+	}
 
 	if err := c.uploadSource(ctx, created.UploadURL, sourcePath, info.Size()); err != nil {
 		return handbrake.RunResult{}, fmt.Errorf("agent upload: %w", err)
@@ -110,6 +127,37 @@ func (c *Client) Encode(
 	_ = c.Delete(dctx, created.JobID)
 
 	return handbrake.RunResult{FinalSize: size, TempPath: tempPath, Log: log}, nil
+}
+
+func (c *Client) encodeInPlace(
+	ctx context.Context,
+	jobID string,
+	onProgress func(handbrake.Progress),
+	cleanup *bool,
+) (handbrake.RunResult, error) {
+	if err := c.watchUntilDone(ctx, jobID, onProgress); err != nil {
+		logCtx, logCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		log, _ := c.fetchLog(logCtx, jobID)
+		logCancel()
+		return handbrake.RunResult{Log: log}, fmt.Errorf("agent encode: %w", err)
+	}
+
+	js, err := c.poll(ctx, jobID)
+	if err != nil {
+		return handbrake.RunResult{}, fmt.Errorf("agent poll result: %w", err)
+	}
+	if js.LocalOutputPath == "" {
+		return handbrake.RunResult{}, errors.New("agent reported in-place encode but no output path")
+	}
+
+	log, _ := c.fetchLog(ctx, jobID)
+
+	*cleanup = false
+	dctx, cancelDel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelDel()
+	_ = c.Delete(dctx, jobID)
+
+	return handbrake.RunResult{FinalSize: js.OutputSizeBytes, TempPath: js.LocalOutputPath, Log: log}, nil
 }
 
 func (c *Client) Delete(ctx context.Context, id string) error {

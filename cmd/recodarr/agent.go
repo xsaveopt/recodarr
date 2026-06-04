@@ -37,6 +37,12 @@ func runAgent() error {
 		maxParallel = n
 	}
 
+	localFS := false
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("RECODARR_AGENT_LOCAL_FS"))) {
+	case "1", "true", "yes", "on":
+		localFS = true
+	}
+
 	sinks, err := logging.Setup(logging.Options{
 		Dir:           filepath.Join(dataDir, "logs"),
 		AppLevel:      logging.ParseLevel(envOr("RECODARR_AGENT_LOG_LEVEL", "INFO")),
@@ -69,7 +75,7 @@ func runAgent() error {
 	runner := agent.NewRunner(store, maxParallel, sinks.HandbrakeFor)
 	go runner.Run(ctx)
 
-	server := agent.NewServer(store, runner, token, sinks.HandbrakeFor)
+	server := agent.NewServer(store, runner, token, localFS, sinks.HandbrakeFor)
 
 	srv := &http.Server{
 		Addr:              addr,
@@ -78,7 +84,7 @@ func runAgent() error {
 	}
 
 	go func() {
-		logger.Info("recodarr agent listening", "addr", addr, "data", agentDir, "maxParallel", maxParallel)
+		logger.Info("recodarr agent listening", "addr", addr, "data", agentDir, "maxParallel", maxParallel, "localFS", localFS)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("http server", "err", err)
 			cancel()

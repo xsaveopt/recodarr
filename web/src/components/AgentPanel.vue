@@ -81,7 +81,7 @@ async function test() {
       agentSlots.value = res.slots ?? null;
       agentActive.value = res.active ?? null;
       notify.success(
-        `Agent reachable — ${res.slots ?? "?"} slot(s), ${res.active ?? 0} active. ${res.hb ?? ""}`,
+        `Agent reachable — ${res.slots ?? "?"} slot(s), ${res.active ?? 0} active${res.localFs ? ", in-place encoding enabled" : ""}. ${res.hb ?? ""}`,
       );
     } else {
       agentSlots.value = null;

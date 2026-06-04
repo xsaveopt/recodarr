@@ -148,6 +148,7 @@ export const api = {
         hb?: string;
         slots?: number;
         active?: number;
+        localFs?: boolean;
       }>("POST", "/agent/test", body),
   },
   auth: {

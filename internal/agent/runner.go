@@ -99,7 +99,7 @@ func (r *Runner) encode(parent context.Context, id string) {
 
 	logFile, err := os.OpenFile(r.store.LogPath(js), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
-		r.finish(id, StateFailed, fmt.Errorf("open log: %w", err), 0)
+		r.finish(id, StateFailed, fmt.Errorf("open log: %w", err), 0, "")
 		return
 	}
 	defer func() { _ = logFile.Close() }()
@@ -126,25 +126,35 @@ func (r *Runner) encode(parent context.Context, id string) {
 		r.publish(id, Event{Progress: &ProgressPayload{Percent: p.Percent, FPS: p.FPS, ETA: p.ETA}})
 	}
 
-	res, err := handbrake.Run(ctx, r.store.SourcePath(js), settings, sink, onProgress)
+	input := r.store.SourcePath(js)
+	if js.LocalSource {
+		input = js.Request.SourcePath
+	}
+
+	res, err := handbrake.Run(ctx, input, settings, sink, onProgress)
 	if err != nil {
 		if errors.Is(ctx.Err(), context.Canceled) {
-			r.finish(id, StateCancelled, errors.New("cancelled"), 0)
+			r.finish(id, StateCancelled, errors.New("cancelled"), 0, "")
 			return
 		}
-		r.finish(id, StateFailed, err, 0)
+		r.finish(id, StateFailed, err, 0, "")
+		return
+	}
+
+	if js.LocalSource {
+		r.finish(id, StateDone, nil, res.FinalSize, res.TempPath)
 		return
 	}
 
 	if err := os.Rename(res.TempPath, r.store.OutputPath(js)); err != nil {
 		_ = os.Remove(res.TempPath)
-		r.finish(id, StateFailed, fmt.Errorf("publish output: %w", err), 0)
+		r.finish(id, StateFailed, fmt.Errorf("publish output: %w", err), 0, "")
 		return
 	}
-	r.finish(id, StateDone, nil, res.FinalSize)
+	r.finish(id, StateDone, nil, res.FinalSize, "")
 }
 
-func (r *Runner) finish(id string, terminal State, encErr error, finalSize int64) {
+func (r *Runner) finish(id string, terminal State, encErr error, finalSize int64, localOutput string) {
 	now := time.Now()
 	msg := ""
 	if encErr != nil {
@@ -155,6 +165,7 @@ func (r *Runner) finish(id string, terminal State, encErr error, finalSize int64
 		js.FinishedAt = &now
 		js.Error = msg
 		js.OutputSizeBytes = finalSize
+		js.LocalOutputPath = localOutput
 		return nil
 	}); err != nil {
 		slog.Error("agent: persist terminal state", "id", id, "err", err)

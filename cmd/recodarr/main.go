@@ -113,7 +113,8 @@ func runServer() error {
 			return nil
 		}
 		client := agentpkg.NewClient(cfg.AgentURL, cfg.AgentToken)
-		if _, err := client.Ping(rctx); err != nil {
+		hs, err := client.Ping(rctx)
+		if err != nil {
 			if cfg.AgentFallbackLocal {
 				slog.Warn("remote agent unreachable, falling back to local encode", "url", cfg.AgentURL, "err", err)
 				return nil
@@ -122,6 +123,7 @@ func runServer() error {
 			slog.Warn("remote agent unreachable, fallback disabled — encode will fail", "url", cfg.AgentURL, "err", err)
 			return client
 		}
+		client.SetLocalFS(hs.LocalFS)
 		return client
 	})
 

@@ -45,6 +45,7 @@ Then in Recodarr's UI: **Settings → Remote Agent** → paste the URL (`http://
 | `RECODARR_AGENT_ADDR` | no | `:8090` | HTTP listen address. |
 | `RECODARR_DATA_DIR` | no | `/data` | Per-job state, uploads, and outputs go under `<dir>/agent/jobs/<id>/`. |
 | `RECODARR_AGENT_MAX_PARALLEL` | no | `1` | Concurrent encodes. HandBrake hwaccel doesn't parallelize on consumer GPUs; raise only on workstation cards. |
+| `RECODARR_AGENT_LOCAL_FS` | no | `false` | Enable in-place encoding when the agent already sees the source file on a shared mount. See [In-place encoding](#in-place-encoding-on-shared-storage). |
 | `RECODARR_AGENT_LOG_LEVEL` | no | `INFO` | `DEBUG` / `INFO` / `WARN` / `ERROR` for the agent's stdout. |
 
 The agent has **no database, no SPA, no Sonarr/Radarr clients, no encoding queue from webhooks** — only the HTTP protocol below.
@@ -67,6 +68,31 @@ It doesn't:
 - Authenticate per-user or per-job — one shared token for the whole agent.
 - Terminate TLS — put Caddy/Traefik/Nginx in front for HTTPS.
 - Resume partial uploads — a failed `PUT` retries from byte 0. Recodarr's job retry semantics (5 attempts) cover this.
+
+## In-place encoding on shared storage
+
+If the agent host already mounts the same media share as the main Recodarr (same NFS/SMB export, same paths), you can skip both transfers entirely. Set `RECODARR_AGENT_LOCAL_FS=true` and bind-mount the media into the agent at the **same absolute path** the server uses.
+
+How it works:
+
+1. The server computes a content fingerprint of the source (file size + SHA-256 over the head, middle, and tail 4 MiB windows — cheap even on huge files) and sends it, with the absolute path, in `POST /v1/jobs`.
+2. The agent stats that path locally. If it exists, the size matches, and the fingerprint matches, it answers `localSource: true` — no `uploadUrl`, no upload.
+3. The agent runs HandBrake reading the shared file directly and writes the temp output as a sibling (`.<name>.recodarr.tmp.<ext>`) on the same share.
+4. The server commits in place (atomic rename over the original) using its own view of the share — no download. Size-guard / bloat-policy logic is unchanged.
+
+The fingerprint is the safety check: if the agent's path resolves to a *different* file (different mount layout, stale copy), the hash won't match and the job falls back to the normal upload/download flow automatically. Same fallback if the file isn't present or `RECODARR_AGENT_LOCAL_FS` is off.
+
+The server only attempts this when the agent advertises `localFs: true` on `/healthz`, so leaving it off costs nothing. **Test connection** in the UI reports `in-place encoding enabled` when active.
+
+```yaml
+    environment:
+      RECODARR_MODE: agent
+      RECODARR_AGENT_TOKEN: ${AGENT_TOKEN:?set this}
+      RECODARR_AGENT_LOCAL_FS: "true"
+    volumes:
+      - ./agent-data:/data
+      - /mnt/media:/mnt/media        # MUST match the server's path exactly
+```
 
 ## Bandwidth and when it's worth it
 
@@ -112,14 +138,14 @@ All endpoints under `/v1`. Auth: `Authorization: Bearer <token>` on everything e
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `POST` | `/v1/jobs` | Create a job. Body: `{filename, sizeBytes, settings, outputContainer}`. Returns `{jobId, uploadUrl}`. |
-| `PUT` | `/v1/jobs/{id}/source` | Stream raw source bytes. `Content-Length` must match the declared `sizeBytes`. |
+| `POST` | `/v1/jobs` | Create a job. Body: `{filename, sizeBytes, settings, outputContainer, sourcePath?, sourceHash?}`. Returns `{jobId, uploadUrl}`, or `{jobId, localSource: true}` when the agent encodes in place (then there's no `uploadUrl` and you skip the `PUT`). |
+| `PUT` | `/v1/jobs/{id}/source` | Stream raw source bytes. `Content-Length` must match the declared `sizeBytes`. Not used for in-place jobs. |
 | `GET` | `/v1/jobs` | List current jobs. |
 | `GET` | `/v1/jobs/{id}` | JSON snapshot of one job. |
 | `GET` | `/v1/jobs/{id}/events` | SSE stream of `progress` + `state` events. |
 | `GET` | `/v1/jobs/{id}/output` | Download encoded file. Range supported. |
 | `GET` | `/v1/jobs/{id}/log` | Plain-text HandBrake stdout/stderr from the encode. |
 | `DELETE` | `/v1/jobs/{id}` | Cancel if active, delete on disk. Idempotent. |
-| `GET` | `/v1/healthz` | Unauthed. `{version, handbrakeVersion, slotsUsed, slotsMax, jobsActive, diskFreeBytes}`. |
+| `GET` | `/v1/healthz` | Unauthed. `{version, handbrakeVersion, slotsUsed, slotsMax, jobsActive, diskFreeBytes, localFs}`. |
 
 States: `awaiting_source → queued → encoding → done | failed | cancelled`.

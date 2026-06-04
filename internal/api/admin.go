@@ -1808,6 +1808,7 @@ func testAgent(st *store.Store) http.HandlerFunc {
 			"hb":      hs.HandbrakeVersion,
 			"slots":   hs.SlotsMax,
 			"active":  hs.JobsActive,
+			"localFs": hs.LocalFS,
 		})
 	}
 }
