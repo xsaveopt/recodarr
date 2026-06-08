@@ -67,7 +67,7 @@ async function load(silent = false) {
     loadOne(() => api.stats.get(), "Couldn't load stats", silent).then((r) => {
       if (r) stats.value = r;
     }),
-    loadOne(() => api.jobs.list({ limit: 12 }), "Couldn't load recent jobs", silent).then((r) => {
+    loadOne(() => api.jobs.list({ limit: 12, sort: "updated" }), "Couldn't load recent jobs", silent).then((r) => {
       if (r) recentJobs.value = r.jobs;
     }),
     loadOne(

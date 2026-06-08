@@ -164,6 +164,7 @@ export interface JobListParams {
   limit?: number;
   offset?: number;
   order?: "asc" | "desc";
+  sort?: "id" | "updated";
 }
 
 export interface JobsPage {

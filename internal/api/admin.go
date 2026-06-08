@@ -1392,6 +1392,7 @@ func listJobs(st *store.Store) http.HandlerFunc {
 			Kinds:     splitNonEmpty(q.Get("kind")),
 			Search:    q.Get("q"),
 			Ascending: q.Get("order") == "asc",
+			SortBy:    q.Get("sort"),
 		}
 		if v := q.Get("profileId"); v != "" {
 			if n, err := strconv.ParseInt(v, 10, 64); err == nil {

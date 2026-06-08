@@ -115,6 +115,7 @@ export const api = {
       if (params.limit != null) q.set("limit", String(params.limit));
       if (params.offset != null) q.set("offset", String(params.offset));
       if (params.order) q.set("order", params.order);
+      if (params.sort) q.set("sort", params.sort);
       const qs = q.toString();
       return request<JobsPage>("GET", `/jobs${qs ? `?${qs}` : ""}`);
     },

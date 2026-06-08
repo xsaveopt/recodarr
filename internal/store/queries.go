@@ -490,6 +490,7 @@ type JobListOptions struct {
 	Offset    int
 
 	Ascending bool
+	SortBy    string
 }
 
 func (s *Store) ListJobs(ctx context.Context, opts JobListOptions) ([]JobRow, int64, error) {
@@ -511,9 +512,13 @@ func (s *Store) ListJobs(ctx context.Context, opts JobListOptions) ([]JobRow, in
 	if opts.Ascending {
 		order = "ASC"
 	}
+	orderBy := "id " + order
+	if opts.SortBy == "updated" {
+		orderBy = "updated_at " + order + ", id " + order
+	}
 	pageArgs := append(append([]any{}, args...), limit, opts.Offset)
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT `+jobCols+` FROM jobs `+where+` ORDER BY id `+order+` LIMIT ? OFFSET ?`, pageArgs...)
+		`SELECT `+jobCols+` FROM jobs `+where+` ORDER BY `+orderBy+` LIMIT ? OFFSET ?`, pageArgs...)
 	if err != nil {
 		return nil, 0, err
 	}
