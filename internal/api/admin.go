@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/sratabix/recodarr/internal/agent"
 	"github.com/sratabix/recodarr/internal/arr"
@@ -227,6 +228,7 @@ func registerAdminRoutes(r chi.Router, st *store.Store, w workerClient, hc *heal
 		r.Post("/{id}/test", testArrInstance(st))
 		r.Get("/{id}/tags", listArrTags(st))
 		r.Get("/{id}/library", listArrLibrary(st))
+		r.Get("/{id}/library/scan", scanArrLibrary(st))
 		r.Post("/{id}/library/queue", queueArrLibrary(st))
 
 		r.Get("/{id}/webhook-secret", revealArrWebhookSecret(st))
@@ -673,6 +675,140 @@ func listArrLibrary(st *store.Store) http.HandlerFunc {
 	}
 }
 
+type scanItemDTO struct {
+	ItemID         int64  `json:"itemId"`
+	Title          string `json:"title"`
+	Path           string `json:"path"`
+	TagLabel       string `json:"tagLabel"`
+	ProfileName    string `json:"profileName"`
+	FileCount      int    `json:"fileCount"`
+	EncodedCount   int    `json:"encodedCount"`
+	UnencodedCount int    `json:"unencodedCount"`
+}
+
+type scanResponseDTO struct {
+	Items          []scanItemDTO `json:"items"`
+	NoMappings     bool          `json:"noMappings"`
+	SuffixDisabled bool          `json:"suffixDisabled"`
+}
+
+func scanArrLibrary(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+		if err != nil {
+			http.Error(w, "bad id", http.StatusBadRequest)
+			return
+		}
+		inst, err := st.GetArrInstance(r.Context(), id)
+		if err != nil {
+			http.Error(w, "instance not found", http.StatusNotFound)
+			return
+		}
+		if inst.Kind != "sonarr" && inst.Kind != "radarr" {
+			http.Error(w, "unsupported instance kind", http.StatusBadRequest)
+			return
+		}
+
+		cfg, err := st.LoadAppSettings(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if !cfg.OutputSuffixEnabled {
+			writeJSON(w, http.StatusOK, scanResponseDTO{Items: []scanItemDTO{}, SuffixDisabled: true})
+			return
+		}
+
+		mappings, err := st.ListTagMappingsByKind(r.Context(), inst.Kind)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if len(mappings) == 0 {
+			writeJSON(w, http.StatusOK, scanResponseDTO{Items: []scanItemDTO{}, NoMappings: true})
+			return
+		}
+		mapByTagID := make(map[int64]store.TagMappingRow, len(mappings))
+		for _, mp := range mappings {
+			if _, exists := mapByTagID[mp.TagID]; !exists {
+				mapByTagID[mp.TagID] = mp
+			}
+		}
+
+		profiles, err := st.ListProfiles(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		profileNames := make(map[int64]string, len(profiles))
+		for _, p := range profiles {
+			profileNames[p.ID] = p.Name
+		}
+
+		client := arr.New(arr.Kind(inst.Kind), inst.URL, inst.APIKey)
+		items, err := client.Library(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		tags, err := client.Tags(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		tagLabels := make(map[int64]string, len(tags))
+		for _, t := range tags {
+			tagLabels[t.ID] = t.Label
+		}
+
+		out := make([]scanItemDTO, 0, len(items))
+		for _, it := range items {
+			for _, tid := range it.TagIDs {
+				mp, ok := mapByTagID[tid]
+				if !ok {
+					continue
+				}
+				out = append(out, scanItemDTO{
+					ItemID:      it.ID,
+					Title:       it.Title,
+					Path:        it.Path,
+					TagLabel:    tagLabels[tid],
+					ProfileName: profileNames[mp.ProfileID],
+					FileCount:   it.FileCount,
+				})
+				break
+			}
+		}
+
+		g, ctx := errgroup.WithContext(r.Context())
+		g.SetLimit(6)
+		for i := range out {
+			i := i
+			g.Go(func() error {
+				files, err := client.Files(ctx, out[i].ItemID)
+				if err != nil {
+					return fmt.Errorf("item %d (%s): %w", out[i].ItemID, out[i].Title, err)
+				}
+				out[i].FileCount = len(files)
+				for _, f := range files {
+					if sidecarExists(f.Path, cfg.OutputSuffix) {
+						out[i].EncodedCount++
+					} else {
+						out[i].UnencodedCount++
+					}
+				}
+				return nil
+			})
+		}
+		if err := g.Wait(); err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, scanResponseDTO{Items: out})
+	}
+}
+
 type queueLibraryRequest struct {
 	ItemIDs []int64 `json:"itemIds"`
 }
@@ -706,6 +842,12 @@ func queueArrLibrary(st *store.Store) http.HandlerFunc {
 		}
 		if len(req.ItemIDs) == 0 {
 			writeJSON(w, http.StatusOK, queueLibraryResponse{})
+			return
+		}
+
+		cfg, err := st.LoadAppSettings(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
@@ -776,6 +918,11 @@ func queueArrLibrary(st *store.Store) http.HandlerFunc {
 				if err != nil {
 					resp.Skipped++
 					resp.Errors = append(resp.Errors, fmt.Sprintf("file %s: %v", f.Path, err))
+					continue
+				}
+
+				if cfg.OutputSuffixEnabled && sidecarExists(clean, cfg.OutputSuffix) {
+					resp.Skipped++
 					continue
 				}
 

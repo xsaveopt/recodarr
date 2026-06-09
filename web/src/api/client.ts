@@ -14,6 +14,7 @@ import type {
   LibraryResponse,
   Profile,
   QbitInstance,
+  ScanResponse,
   TagMapping,
   WorkerStatus,
 } from "@/types/api";
@@ -73,6 +74,8 @@ export const api = {
     revealWebhookSecret: (id: number) =>
       request<{ username: string; password: string }>("GET", `/arr-instances/${id}/webhook-secret`),
     library: (id: number) => request<LibraryResponse>("GET", `/arr-instances/${id}/library`),
+    scanLibrary: (id: number) =>
+      request<ScanResponse>("GET", `/arr-instances/${id}/library/scan`),
     queueLibrary: (id: number, itemIds: number[]) =>
       request<LibraryQueueResponse>("POST", `/arr-instances/${id}/library/queue`, { itemIds }),
   },

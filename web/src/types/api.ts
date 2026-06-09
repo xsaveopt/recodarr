@@ -156,6 +156,23 @@ export interface LibraryQueueResponse {
   errors?: string[];
 }
 
+export interface ScanItem {
+  itemId: number;
+  title: string;
+  path: string;
+  tagLabel: string;
+  profileName: string;
+  fileCount: number;
+  encodedCount: number;
+  unencodedCount: number;
+}
+
+export interface ScanResponse {
+  items: ScanItem[];
+  noMappings: boolean;
+  suffixDisabled: boolean;
+}
+
 export interface JobListParams {
   status?: string;
   kind?: string;
