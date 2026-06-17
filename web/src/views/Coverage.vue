@@ -20,6 +20,7 @@ const activeInstanceId = ref<number | null>(null);
 const items = ref<ScanItem[]>([]);
 const noMappings = ref(false);
 const suffixDisabled = ref(false);
+const markerEnabled = ref<boolean | null>(null);
 const scanned = ref(false);
 const scanning = ref(false);
 const loadError = ref("");
@@ -35,6 +36,8 @@ const eligibleInstances = computed(() =>
   instances.value.filter((i) => i.enabled && (i.kind === "sonarr" || i.kind === "radarr")),
 );
 
+const markerOff = computed(() => markerEnabled.value === false);
+
 const filteredItems = computed(() => {
   const needle = titleFilter.value.trim().toLowerCase();
   return items.value.filter((it) => {
@@ -49,9 +52,10 @@ const totals = computed(() =>
     (acc, it) => {
       acc.files += it.fileCount;
       acc.encoded += it.encodedCount;
+      acc.queued += it.queuedCount;
       return acc;
     },
-    { files: 0, encoded: 0 },
+    { files: 0, encoded: 0, queued: 0 },
   ),
 );
 
@@ -66,9 +70,13 @@ function pct(it: ScanItem) {
 
 function status(it: ScanItem): { label: string; severity: string } {
   if (it.fileCount === 0) return { label: "no files", severity: "secondary" };
-  if (it.unencodedCount === 0) return { label: "complete", severity: "success" };
-  if (it.encodedCount === 0) return { label: "none", severity: "danger" };
-  return { label: "partial", severity: "warn" };
+  if (it.unencodedCount > 0) {
+    return it.encodedCount === 0 && it.queuedCount === 0
+      ? { label: "none", severity: "danger" }
+      : { label: "partial", severity: "warn" };
+  }
+  if (it.queuedCount > 0) return { label: "queued", severity: "info" };
+  return { label: "complete", severity: "success" };
 }
 
 async function loadInstances() {
@@ -80,8 +88,13 @@ async function loadInstances() {
   }
 }
 
+async function loadMarkerSetting() {
+  const s = await notify.tryRun(() => api.settings.get(), "Couldn't load settings");
+  markerEnabled.value = s ? s.output_suffix_enabled === "true" : false;
+}
+
 async function scan() {
-  if (activeInstanceId.value == null) return;
+  if (activeInstanceId.value == null || markerOff.value) return;
   scanning.value = true;
   loadError.value = "";
   selected.value = [];
@@ -136,7 +149,10 @@ async function doQueue() {
   }
 }
 
-onMounted(loadInstances);
+onMounted(() => {
+  void loadInstances();
+  void loadMarkerSetting();
+});
 </script>
 
 <template>
@@ -169,11 +185,19 @@ onMounted(loadInstances);
         </button>
       </div>
 
+      <div v-if="markerOff" class="empty">
+        Encode marker files are disabled, so there's no reliable way to tell which episodes
+        or movies have been encoded. Coverage is unavailable. Enable the output suffix in
+        <RouterLink to="/settings">Settings</RouterLink> — future encodes will write markers
+        that this page can read.
+      </div>
+
+      <template v-else>
       <div class="toolbar">
         <Button
           icon="pi pi-search"
           :label="scanned ? 'Re-scan' : 'Scan'"
-          :disabled="scanning || activeInstanceId == null"
+          :disabled="scanning || activeInstanceId == null || markerEnabled == null"
           :loading="scanning"
           @click="scan"
         />
@@ -189,6 +213,7 @@ onMounted(loadInstances);
         </label>
         <span v-if="scanned && items.length > 0" class="summary muted">
           {{ totals.encoded }}/{{ totals.files }} files encoded across {{ items.length }} items
+          <template v-if="totals.queued > 0">· {{ totals.queued }} queued</template>
         </span>
         <span class="spacer"></span>
         <Button
@@ -258,7 +283,10 @@ onMounted(loadInstances);
           <template #body="{ data }">
             <div class="cov-cell">
               <ProgressBar :value="pct(data)" :showValue="false" style="height: 6px" />
-              <span class="cov-text">{{ data.encodedCount }}/{{ data.fileCount }}</span>
+              <span class="cov-text">
+                {{ data.encodedCount }}/{{ data.fileCount }}
+                <span v-if="data.queuedCount > 0" class="muted">· {{ data.queuedCount }} queued</span>
+              </span>
             </div>
           </template>
         </Column>
@@ -268,6 +296,7 @@ onMounted(loadInstances);
           </template>
         </Column>
       </DataTable>
+      </template>
     </template>
   </section>
 </template>

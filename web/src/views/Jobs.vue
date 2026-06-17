@@ -632,6 +632,13 @@ onUnmounted(() => {
       <Column header="Saved" style="width: 5rem">
         <template #body="{ data }">{{ savings(data) }}</template>
       </Column>
+      <Column header="Added" style="width: 7rem">
+        <template #body="{ data }">
+          <span :title="new Date(data.createdAt).toLocaleString()">{{
+            shortTime(data.createdAt)
+          }}</span>
+        </template>
+      </Column>
       <Column header="Updated" style="width: 7rem">
         <template #body="{ data }">
           <span :title="new Date(data.updatedAt).toLocaleString()">{{

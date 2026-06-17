@@ -605,6 +605,25 @@ func (s *Store) HasActiveJob(ctx context.Context, arrKind string, arrInstanceID,
 	return n > 0, err
 }
 
+func (s *Store) ActiveJobItemIDs(ctx context.Context, arrKind string, arrInstanceID int64) (map[int64]bool, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT DISTINCT arr_item_id FROM jobs WHERE arr_kind=? AND arr_instance_id=? AND status NOT IN ('done','failed','skipped')`,
+		arrKind, arrInstanceID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := make(map[int64]bool)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
+}
+
 type ParentJobSummary struct {
 	Active int
 	Done   int

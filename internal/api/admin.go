@@ -683,6 +683,7 @@ type scanItemDTO struct {
 	ProfileName    string `json:"profileName"`
 	FileCount      int    `json:"fileCount"`
 	EncodedCount   int    `json:"encodedCount"`
+	QueuedCount    int    `json:"queuedCount"`
 	UnencodedCount int    `json:"unencodedCount"`
 }
 
@@ -780,6 +781,12 @@ func scanArrLibrary(st *store.Store) http.HandlerFunc {
 			}
 		}
 
+		activeIDs, err := st.ActiveJobItemIDs(r.Context(), inst.Kind, inst.ID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
 		g, ctx := errgroup.WithContext(r.Context())
 		g.SetLimit(6)
 		for i := range out {
@@ -791,9 +798,12 @@ func scanArrLibrary(st *store.Store) http.HandlerFunc {
 				}
 				out[i].FileCount = len(files)
 				for _, f := range files {
-					if sidecarExists(f.Path, cfg.OutputSuffix) {
+					switch {
+					case sidecarExists(f.Path, cfg.OutputSuffix):
 						out[i].EncodedCount++
-					} else {
+					case activeIDs[f.ID]:
+						out[i].QueuedCount++
+					default:
 						out[i].UnencodedCount++
 					}
 				}

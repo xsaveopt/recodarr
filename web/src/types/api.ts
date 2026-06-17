@@ -164,6 +164,7 @@ export interface ScanItem {
   profileName: string;
   fileCount: number;
   encodedCount: number;
+  queuedCount: number;
   unencodedCount: number;
 }
 
