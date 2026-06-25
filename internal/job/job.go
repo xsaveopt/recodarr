@@ -559,9 +559,16 @@ func (w *Worker) encodeOne(encCtx, parentCtx context.Context, j store.JobRow) {
 		return
 	}
 
+	cfg, _ := w.store.LoadAppSettings(parentCtx)
+
 	if skip, reason := evaluateFilters(parentCtx, profile, j); skip {
 		if err := w.store.MarkJobSkipped(parentCtx, j.ID, reason); err != nil {
 			slog.Error("mark skipped", "id", j.ID, "err", err)
+		}
+		if cfg.OutputSuffixEnabled {
+			if err := writeSkipSidecar(j.FilePath, cfg.OutputSuffix, j, profile, reason); err != nil {
+				slog.Warn("skip sidecar write failed", "id", j.ID, "err", err)
+			}
 		}
 		slog.Info("job skipped by filter", "id", j.ID, "title", j.Title, "reason", reason)
 		return
@@ -591,7 +598,6 @@ func (w *Worker) encodeOne(encCtx, parentCtx context.Context, j store.JobRow) {
 		out := w.HandbrakeWriterFor(j.ID)
 		hbSink = &handbrake.LineSink{Stdout: out, Stderr: out}
 	}
-	cfg, _ := w.store.LoadAppSettings(parentCtx)
 
 	guard := profile.BloatPolicy
 	if guard != "keep_original" && guard != "retry_higher_crf" {
@@ -732,6 +738,11 @@ func (w *Worker) encodeOne(encCtx, parentCtx context.Context, j store.JobRow) {
 		if err := w.store.MarkJobSkipped(parentCtx, j.ID, reason); err != nil {
 			slog.Error("mark skipped (size guard)", "id", j.ID, "err", err)
 		}
+		if cfg.OutputSuffixEnabled {
+			if err := writeSkipSidecar(j.FilePath, cfg.OutputSuffix, j, profile, reason); err != nil {
+				slog.Warn("skip sidecar write failed", "id", j.ID, "err", err)
+			}
+		}
 		slog.Info("size guard kept original", "id", j.ID, "title", j.Title,
 			"original", j.FileSize, "encoded", lastResult.FinalSize, "attempts", attempt)
 		go notify.Send(context.Background(), w.store, j.Title, "skipped", j.FilePath, j.FileSize, 0)
@@ -788,6 +799,19 @@ func sidecarPath(mediaPath, suffix string) string {
 	base := filepath.Base(mediaPath)
 	stem := strings.TrimSuffix(base, filepath.Ext(base))
 	return filepath.Join(dir, stem+"."+suffix)
+}
+
+func writeSkipSidecar(mediaPath, suffix string, j store.JobRow, p *store.ProfileRow, reason string) error {
+	path := sidecarPath(mediaPath, suffix)
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Recodarr marker — file was skipped, not re-encoded. Delete to re-evaluate.\n")
+	fmt.Fprintf(&b, "status=skipped\n")
+	fmt.Fprintf(&b, "skipped_at=%s\n", time.Now().UTC().Format(time.RFC3339))
+	fmt.Fprintf(&b, "job_id=%d\n", j.ID)
+	fmt.Fprintf(&b, "title=%s\n", j.Title)
+	fmt.Fprintf(&b, "profile=%s\n", p.Name)
+	fmt.Fprintf(&b, "reason=%s\n", reason)
+	return os.WriteFile(path, []byte(b.String()), 0o644)
 }
 
 func writeSidecar(mediaPath, suffix string, j store.JobRow, p *store.ProfileRow, finalSize int64) error {
