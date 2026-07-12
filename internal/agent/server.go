@@ -17,7 +17,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/sratabix/recodarr/internal/handbrake"
+	"github.com/xsaveopt/recodarr/internal/handbrake"
 )
 
 const AgentVersion = "1"

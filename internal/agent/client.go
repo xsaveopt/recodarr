@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sratabix/recodarr/internal/handbrake"
+	"github.com/xsaveopt/recodarr/internal/handbrake"
 )
 
 type Client struct {

@@ -18,14 +18,14 @@ import (
 	"github.com/go-chi/chi/v5"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/sratabix/recodarr/internal/agent"
-	"github.com/sratabix/recodarr/internal/arr"
-	"github.com/sratabix/recodarr/internal/handbrake"
-	"github.com/sratabix/recodarr/internal/health"
-	"github.com/sratabix/recodarr/internal/job"
-	"github.com/sratabix/recodarr/internal/logging"
-	"github.com/sratabix/recodarr/internal/qbit"
-	"github.com/sratabix/recodarr/internal/store"
+	"github.com/xsaveopt/recodarr/internal/agent"
+	"github.com/xsaveopt/recodarr/internal/arr"
+	"github.com/xsaveopt/recodarr/internal/handbrake"
+	"github.com/xsaveopt/recodarr/internal/health"
+	"github.com/xsaveopt/recodarr/internal/job"
+	"github.com/xsaveopt/recodarr/internal/logging"
+	"github.com/xsaveopt/recodarr/internal/qbit"
+	"github.com/xsaveopt/recodarr/internal/store"
 )
 
 type workerClient interface {

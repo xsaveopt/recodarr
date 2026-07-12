@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/sratabix/recodarr/internal/store"
+	"github.com/xsaveopt/recodarr/internal/store"
 )
 
 var notifyClient = &http.Client{Timeout: 10 * time.Second}

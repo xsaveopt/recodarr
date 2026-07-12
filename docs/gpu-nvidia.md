@@ -1,6 +1,6 @@
 # NVIDIA GPU acceleration
 
-This guide gets NVENC and NVDEC working inside the Recodarr container so HandBrake can encode on your GPU instead of CPU. Tested with the standard `ghcr.io/sratabix/recodarr` image.
+This guide gets NVENC and NVDEC working inside the Recodarr container so HandBrake can encode on your GPU instead of CPU. Tested with the standard `ghcr.io/xsaveopt/recodarr` image.
 
 ## What you get
 
@@ -53,7 +53,7 @@ Add the highlighted block to your existing `recodarr` service:
 ```yaml
 services:
   recodarr:
-    image: ghcr.io/sratabix/recodarr:latest
+    image: ghcr.io/xsaveopt/recodarr:latest
     container_name: recodarr
     restart: unless-stopped
     ports:

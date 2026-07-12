@@ -14,9 +14,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sratabix/recodarr/internal/agent"
-	"github.com/sratabix/recodarr/internal/handbrake"
-	"github.com/sratabix/recodarr/internal/logging"
+	"github.com/xsaveopt/recodarr/internal/agent"
+	"github.com/xsaveopt/recodarr/internal/handbrake"
+	"github.com/xsaveopt/recodarr/internal/logging"
 )
 
 func runAgent() error {

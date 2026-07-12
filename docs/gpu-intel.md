@@ -70,7 +70,7 @@ Add the highlighted block to your existing `recodarr` service:
 ```yaml
 services:
   recodarr:
-    image: ghcr.io/sratabix/recodarr:latest
+    image: ghcr.io/xsaveopt/recodarr:latest
     container_name: recodarr
     restart: unless-stopped
     ports:

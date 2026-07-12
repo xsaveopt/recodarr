@@ -3,7 +3,7 @@ package agent
 import (
 	"time"
 
-	"github.com/sratabix/recodarr/internal/handbrake"
+	"github.com/xsaveopt/recodarr/internal/handbrake"
 )
 
 const PathPrefix = "/v1"

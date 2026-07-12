@@ -10,7 +10,7 @@ On the GPU host:
 # docker-compose.agent.yml
 services:
   recodarr-agent:
-    image: ghcr.io/sratabix/recodarr:latest
+    image: ghcr.io/xsaveopt/recodarr:latest
     container_name: recodarr-agent
     restart: unless-stopped
     environment:

@@ -12,9 +12,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/sratabix/recodarr/internal/handbrake"
-	"github.com/sratabix/recodarr/internal/job"
-	"github.com/sratabix/recodarr/internal/store"
+	"github.com/xsaveopt/recodarr/internal/handbrake"
+	"github.com/xsaveopt/recodarr/internal/job"
+	"github.com/xsaveopt/recodarr/internal/store"
 )
 
 const scrapeTimeout = 5 * time.Second

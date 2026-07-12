@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sratabix/recodarr/internal/handbrake"
+	"github.com/xsaveopt/recodarr/internal/handbrake"
 )
 
 const terminalTTL = 1 * time.Hour

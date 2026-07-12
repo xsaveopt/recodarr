@@ -10,12 +10,12 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	"github.com/sratabix/recodarr/internal/arr"
-	"github.com/sratabix/recodarr/internal/auth"
-	"github.com/sratabix/recodarr/internal/health"
-	"github.com/sratabix/recodarr/internal/job"
-	"github.com/sratabix/recodarr/internal/metrics"
-	"github.com/sratabix/recodarr/internal/store"
+	"github.com/xsaveopt/recodarr/internal/arr"
+	"github.com/xsaveopt/recodarr/internal/auth"
+	"github.com/xsaveopt/recodarr/internal/health"
+	"github.com/xsaveopt/recodarr/internal/job"
+	"github.com/xsaveopt/recodarr/internal/metrics"
+	"github.com/xsaveopt/recodarr/internal/store"
 )
 
 func NewRouter(st *store.Store, worker *job.Worker, hc *health.Checker, lls LogLevelSetter, assets fs.FS, access *slog.Logger) http.Handler {

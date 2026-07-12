@@ -13,17 +13,17 @@ import (
 	"syscall"
 	"time"
 
-	agentpkg "github.com/sratabix/recodarr/internal/agent"
-	"github.com/sratabix/recodarr/internal/api"
-	"github.com/sratabix/recodarr/internal/arr"
-	"github.com/sratabix/recodarr/internal/auth"
-	"github.com/sratabix/recodarr/internal/handbrake"
-	"github.com/sratabix/recodarr/internal/health"
-	"github.com/sratabix/recodarr/internal/job"
-	"github.com/sratabix/recodarr/internal/logging"
-	"github.com/sratabix/recodarr/internal/qbit"
-	"github.com/sratabix/recodarr/internal/store"
-	"github.com/sratabix/recodarr/web"
+	agentpkg "github.com/xsaveopt/recodarr/internal/agent"
+	"github.com/xsaveopt/recodarr/internal/api"
+	"github.com/xsaveopt/recodarr/internal/arr"
+	"github.com/xsaveopt/recodarr/internal/auth"
+	"github.com/xsaveopt/recodarr/internal/handbrake"
+	"github.com/xsaveopt/recodarr/internal/health"
+	"github.com/xsaveopt/recodarr/internal/job"
+	"github.com/xsaveopt/recodarr/internal/logging"
+	"github.com/xsaveopt/recodarr/internal/qbit"
+	"github.com/xsaveopt/recodarr/internal/store"
+	"github.com/xsaveopt/recodarr/web"
 )
 
 func main() {

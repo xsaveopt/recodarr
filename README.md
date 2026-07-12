@@ -35,7 +35,7 @@ Start the container, open `http://<host>:8080`, and you'll be sent to the setup 
 ```yaml
 services:
   recodarr:
-    image: ghcr.io/sratabix/recodarr:latest
+    image: ghcr.io/xsaveopt/recodarr:latest
     container_name: recodarr
     restart: unless-stopped
     ports:
@@ -134,7 +134,7 @@ When to use it: your storage server is a low-power NAS, but you have a workstati
 # docker-compose.agent.yml
 services:
   recodarr-agent:
-    image: ghcr.io/sratabix/recodarr:latest
+    image: ghcr.io/xsaveopt/recodarr:latest
     environment:
       RECODARR_MODE: agent
       RECODARR_AGENT_TOKEN: ${AGENT_TOKEN:?set this}
@@ -153,7 +153,7 @@ Full reference — protocol, failure modes, bandwidth math, security caveats, al
 
 ## Image tags
 
-`latest` for the latest stable release. `1`, `1.2`, `1.2.3` to pin to a major, minor, or patch line. Pre-releases like `1.2.3-rc1` are never tagged `latest`. `dev` tracks the tip of the `main` branch (rebuilt on every commit) and is the easiest tag to use for testing without waiting for a release. Images are published to `ghcr.io/sratabix/recodarr` and built for `linux/amd64`.
+`latest` for the latest stable release. `1`, `1.2`, `1.2.3` to pin to a major, minor, or patch line. Pre-releases like `1.2.3-rc1` are never tagged `latest`. `dev` tracks the tip of the `main` branch (rebuilt on every commit) and is the easiest tag to use for testing without waiting for a release. Images are published to `ghcr.io/xsaveopt/recodarr` and built for `linux/amd64`.
 
 ## Environment variables
 

@@ -17,13 +17,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sratabix/recodarr/internal/arr"
-	"github.com/sratabix/recodarr/internal/audio"
-	"github.com/sratabix/recodarr/internal/handbrake"
-	"github.com/sratabix/recodarr/internal/notify"
-	"github.com/sratabix/recodarr/internal/probe"
-	"github.com/sratabix/recodarr/internal/qbit"
-	"github.com/sratabix/recodarr/internal/store"
+	"github.com/xsaveopt/recodarr/internal/arr"
+	"github.com/xsaveopt/recodarr/internal/audio"
+	"github.com/xsaveopt/recodarr/internal/handbrake"
+	"github.com/xsaveopt/recodarr/internal/notify"
+	"github.com/xsaveopt/recodarr/internal/probe"
+	"github.com/xsaveopt/recodarr/internal/qbit"
+	"github.com/xsaveopt/recodarr/internal/store"
 )
 
 type Status string

@@ -17,9 +17,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/sratabix/recodarr/internal/arr"
-	"github.com/sratabix/recodarr/internal/job"
-	"github.com/sratabix/recodarr/internal/store"
+	"github.com/xsaveopt/recodarr/internal/arr"
+	"github.com/xsaveopt/recodarr/internal/job"
+	"github.com/xsaveopt/recodarr/internal/store"
 )
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

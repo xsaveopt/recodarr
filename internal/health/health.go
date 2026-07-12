@@ -10,12 +10,12 @@ import (
 
 	"log/slog"
 
-	"github.com/sratabix/recodarr/internal/agent"
-	"github.com/sratabix/recodarr/internal/arr"
-	"github.com/sratabix/recodarr/internal/handbrake"
-	"github.com/sratabix/recodarr/internal/notify"
-	"github.com/sratabix/recodarr/internal/qbit"
-	"github.com/sratabix/recodarr/internal/store"
+	"github.com/xsaveopt/recodarr/internal/agent"
+	"github.com/xsaveopt/recodarr/internal/arr"
+	"github.com/xsaveopt/recodarr/internal/handbrake"
+	"github.com/xsaveopt/recodarr/internal/notify"
+	"github.com/xsaveopt/recodarr/internal/qbit"
+	"github.com/xsaveopt/recodarr/internal/store"
 )
 
 const (

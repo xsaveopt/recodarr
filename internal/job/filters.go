@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sratabix/recodarr/internal/probe"
-	"github.com/sratabix/recodarr/internal/store"
+	"github.com/xsaveopt/recodarr/internal/probe"
+	"github.com/xsaveopt/recodarr/internal/store"
 )
 
 func evaluateFilters(ctx context.Context, p *store.ProfileRow, j store.JobRow) (bool, string) {

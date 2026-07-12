@@ -1,4 +1,4 @@
-module github.com/sratabix/recodarr
+module github.com/xsaveopt/recodarr
 
 go 1.26
 

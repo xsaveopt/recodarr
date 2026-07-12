@@ -9,7 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	"github.com/sratabix/recodarr/internal/auth"
+	"github.com/xsaveopt/recodarr/internal/auth"
 )
 
 var loginLimiter = auth.NewLoginLimiter()
