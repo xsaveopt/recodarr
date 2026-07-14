@@ -23,13 +23,21 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - uses: pnpm/setup@v1
+      - uses: actions/setup-node@v6
         with:
-          runtime: node@26
-          package-json-file: web/package.json
-          cache-dependency-path: web/pnpm-lock.yaml
-          cache: true
-          install: false
+          node-version: 26
+
+      - name: Install pnpm
+        run: npm install -g "pnpm@$(node -p "require('./web/package.json').packageManager.split('@')[1].split('+')[0]")"
+
+      - name: Configure pnpm store cache
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
+
+      - uses: actions/cache@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('web/pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-store-
 
       - name: Install frontend deps
         run: pnpm install --frozen-lockfile
