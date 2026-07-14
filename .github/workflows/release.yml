@@ -23,26 +23,28 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - uses: actions/setup-node@v6
+      - uses: pnpm/setup@v1
         with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+          runtime: node@26
+          package-json-file: web/package.json
+          cache-dependency-path: web/pnpm-lock.yaml
+          cache: true
+          install: false
 
       - name: Install frontend deps
-        run: npm ci
+        run: pnpm install --frozen-lockfile
         working-directory: web
 
       - name: Frontend typecheck
-        run: npm run typecheck
+        run: pnpm run typecheck
         working-directory: web
 
       - name: Frontend lint
-        run: npm run lint
+        run: pnpm run lint
         working-directory: web
 
       - name: Frontend build
-        run: npm run build
+        run: pnpm run build
         working-directory: web
 
       - name: Go vet

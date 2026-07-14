@@ -1,16 +1,17 @@
 # syntax=docker/dockerfile:1.7
 
-ARG NODE_VERSION=24
+ARG NODE_VERSION=26
 ARG GO_VERSION=1.26
 ARG HANDBRAKE_VERSION=1.11.2
 
 FROM node:${NODE_VERSION}-alpine AS web-builder
 WORKDIR /web
-COPY web/package.json web/package-lock.json* ./
-RUN --mount=type=cache,target=/root/.npm \
-    if [ -f package-lock.json ]; then npm ci; else npm install; fi
+COPY web/package.json web/pnpm-lock.yaml ./
+RUN npm install -g "pnpm@$(node -p "require('./package.json').packageManager.split('@')[1].split('+')[0]")"
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile
 COPY web/ ./
-RUN npm run build
+RUN pnpm run build
 
 FROM golang:${GO_VERSION}-alpine AS go-builder
 WORKDIR /src
