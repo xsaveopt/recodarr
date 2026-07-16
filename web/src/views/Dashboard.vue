@@ -53,7 +53,11 @@ const waitingCount = computed(
   () => (stats.value?.waitingForSeed ?? 0) + (stats.value?.waitingForHardlink ?? 0),
 );
 
-async function loadOne<T>(fn: () => Promise<T>, errMsg: string, silent: boolean): Promise<T | null> {
+async function loadOne<T>(
+  fn: () => Promise<T>,
+  errMsg: string,
+  silent: boolean,
+): Promise<T | null> {
   try {
     return await fn();
   } catch (e) {
@@ -67,7 +71,11 @@ async function load(silent = false) {
     loadOne(() => api.stats.get(), "Couldn't load stats", silent).then((r) => {
       if (r) stats.value = r;
     }),
-    loadOne(() => api.jobs.list({ limit: 12, sort: "updated" }), "Couldn't load recent jobs", silent).then((r) => {
+    loadOne(
+      () => api.jobs.list({ limit: 12, sort: "updated" }),
+      "Couldn't load recent jobs",
+      silent,
+    ).then((r) => {
       if (r) recentJobs.value = r.jobs;
     }),
     loadOne(
@@ -195,7 +203,11 @@ onUnmounted(() => {
         :title="health.ok ? 'All system checks passing' : `${health.issues.length} active issue(s)`"
       >
         <i class="pi" :class="health.ok ? 'pi-check-circle' : 'pi-exclamation-circle'"></i>
-        {{ health.ok ? "Healthy" : `${health.issues.length} issue${health.issues.length === 1 ? "" : "s"}` }}
+        {{
+          health.ok
+            ? "Healthy"
+            : `${health.issues.length} issue${health.issues.length === 1 ? "" : "s"}`
+        }}
       </span>
       <span class="strip-tick muted tnum"
         >last tick {{ relativeTime(workerStatus.lastTickAt) }}</span

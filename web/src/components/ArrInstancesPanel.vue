@@ -32,15 +32,13 @@ function loadCachedTests() {
   try {
     const raw = localStorage.getItem(TEST_LS_KEY);
     if (raw) testResults.value = JSON.parse(raw);
-  } catch {
-  }
+  } catch {}
 }
 
 function persistTests() {
   try {
     localStorage.setItem(TEST_LS_KEY, JSON.stringify(testResults.value));
-  } catch {
-  }
+  } catch {}
 }
 
 async function load() {

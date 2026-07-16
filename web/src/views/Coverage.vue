@@ -29,8 +29,8 @@ const titleFilter = ref("");
 const hideComplete = ref(true);
 const queuing = ref(false);
 
-const activeInstance = computed(() =>
-  instances.value.find((i) => i.id === activeInstanceId.value) ?? null,
+const activeInstance = computed(
+  () => instances.value.find((i) => i.id === activeInstanceId.value) ?? null,
 );
 const eligibleInstances = computed(() =>
   instances.value.filter((i) => i.enabled && (i.kind === "sonarr" || i.kind === "radarr")),
@@ -160,8 +160,8 @@ onMounted(() => {
     <header class="page-head">
       <h1>Coverage</h1>
       <p class="muted">
-        Scan tagged libraries for encode coverage by checking for a Recodarr marker file
-        alongside each episode/movie file. Queue the items that aren't fully encoded.
+        Scan tagged libraries for encode coverage by checking for a Recodarr marker file alongside
+        each episode/movie file. Queue the items that aren't fully encoded.
       </p>
     </header>
 
@@ -186,116 +186,120 @@ onMounted(() => {
       </div>
 
       <div v-if="markerOff" class="empty">
-        Encode marker files are disabled, so there's no reliable way to tell which episodes
-        or movies have been encoded. Coverage is unavailable. Enable the output suffix in
-        <RouterLink to="/settings">Settings</RouterLink> — future encodes will write markers
-        that this page can read.
+        Encode marker files are disabled, so there's no reliable way to tell which episodes or
+        movies have been encoded. Coverage is unavailable. Enable the output suffix in
+        <RouterLink to="/settings">Settings</RouterLink> — future encodes will write markers that
+        this page can read.
       </div>
 
       <template v-else>
-      <div class="toolbar">
-        <Button
-          icon="pi pi-search"
-          :label="scanned ? 'Re-scan' : 'Scan'"
-          :disabled="scanning || activeInstanceId == null || markerEnabled == null"
-          :loading="scanning"
-          @click="scan"
-        />
-        <InputText
-          v-model="titleFilter"
-          placeholder="Filter by title"
-          class="filter"
-          :disabled="!scanned"
-        />
-        <label class="checkbox-row">
-          <Checkbox v-model="hideComplete" :binary="true" :disabled="!scanned" />
-          <span>Hide fully encoded</span>
-        </label>
-        <span v-if="scanned && items.length > 0" class="summary muted">
-          {{ totals.encoded }}/{{ totals.files }} files encoded across {{ items.length }} items
-          <template v-if="totals.queued > 0">· {{ totals.queued }} queued</template>
-        </span>
-        <span class="spacer"></span>
-        <Button
-          icon="pi pi-play"
-          :label="selected.length === 0
-            ? 'Queue selected'
-            : `Queue ${selected.length} (${selectedUnencoded} file${selectedUnencoded === 1 ? '' : 's'})`"
-          :disabled="selected.length === 0 || queuing"
-          :loading="queuing"
-          @click="doQueue"
-        />
-      </div>
+        <div class="toolbar">
+          <Button
+            icon="pi pi-search"
+            :label="scanned ? 'Re-scan' : 'Scan'"
+            :disabled="scanning || activeInstanceId == null || markerEnabled == null"
+            :loading="scanning"
+            @click="scan"
+          />
+          <InputText
+            v-model="titleFilter"
+            placeholder="Filter by title"
+            class="filter"
+            :disabled="!scanned"
+          />
+          <label class="checkbox-row">
+            <Checkbox v-model="hideComplete" :binary="true" :disabled="!scanned" />
+            <span>Hide fully encoded</span>
+          </label>
+          <span v-if="scanned && items.length > 0" class="summary muted">
+            {{ totals.encoded }}/{{ totals.files }} files encoded across {{ items.length }} items
+            <template v-if="totals.queued > 0">· {{ totals.queued }} queued</template>
+          </span>
+          <span class="spacer"></span>
+          <Button
+            icon="pi pi-play"
+            :label="
+              selected.length === 0
+                ? 'Queue selected'
+                : `Queue ${selected.length} (${selectedUnencoded} file${selectedUnencoded === 1 ? '' : 's'})`
+            "
+            :disabled="selected.length === 0 || queuing"
+            :loading="queuing"
+            @click="doQueue"
+          />
+        </div>
 
-      <div v-if="scanning" class="loading">
-        <ProgressSpinner style="width: 32px; height: 32px" />
-      </div>
-      <div v-else-if="loadError" class="error">{{ loadError }}</div>
-      <div v-else-if="suffixDisabled" class="empty">
-        Encode marker files are disabled, so coverage can't be determined. Enable the
-        output suffix in <RouterLink to="/settings">Settings</RouterLink> and re-encode to
-        start writing markers.
-      </div>
-      <div v-else-if="!scanned" class="empty">
-        Press <strong>Scan</strong> to check encode coverage for tagged items in
-        {{ activeInstance?.name }}. This reads the *arr file list and stats each file, so
-        it may take a moment on large libraries.
-      </div>
-      <div v-else-if="noMappings" class="empty">
-        This instance kind has no tag→profile mappings.
-        <RouterLink to="/settings">Add one in Settings</RouterLink>
-        so Recodarr knows which items to track.
-      </div>
-      <div v-else-if="filteredItems.length === 0" class="empty">
-        <template v-if="items.length === 0">
-          No tagged items in this library that match a mapping.
-        </template>
-        <template v-else>
-          Everything tagged is fully encoded. Uncheck "Hide fully encoded" to review.
-        </template>
-      </div>
-      <DataTable
-        v-else
-        v-model:selection="selected"
-        :value="filteredItems"
-        dataKey="itemId"
-        stripedRows
-        size="small"
-        scrollable
-        scrollHeight="60vh"
-      >
-        <Column selectionMode="multiple" headerStyle="width: 3rem" />
-        <Column field="title" header="Title" sortable>
-          <template #body="{ data }">
-            <div class="title-cell">
-              <div class="title-main">{{ data.title }}</div>
-              <div class="title-path muted">{{ data.path }}</div>
-            </div>
+        <div v-if="scanning" class="loading">
+          <ProgressSpinner style="width: 32px; height: 32px" />
+        </div>
+        <div v-else-if="loadError" class="error">{{ loadError }}</div>
+        <div v-else-if="suffixDisabled" class="empty">
+          Encode marker files are disabled, so coverage can't be determined. Enable the output
+          suffix in <RouterLink to="/settings">Settings</RouterLink> and re-encode to start writing
+          markers.
+        </div>
+        <div v-else-if="!scanned" class="empty">
+          Press <strong>Scan</strong> to check encode coverage for tagged items in
+          {{ activeInstance?.name }}. This reads the *arr file list and stats each file, so it may
+          take a moment on large libraries.
+        </div>
+        <div v-else-if="noMappings" class="empty">
+          This instance kind has no tag→profile mappings.
+          <RouterLink to="/settings">Add one in Settings</RouterLink>
+          so Recodarr knows which items to track.
+        </div>
+        <div v-else-if="filteredItems.length === 0" class="empty">
+          <template v-if="items.length === 0">
+            No tagged items in this library that match a mapping.
           </template>
-        </Column>
-        <Column field="tagLabel" header="Tag" sortable style="width: 10rem">
-          <template #body="{ data }">
-            <Tag :value="data.tagLabel" severity="secondary" />
+          <template v-else>
+            Everything tagged is fully encoded. Uncheck "Hide fully encoded" to review.
           </template>
-        </Column>
-        <Column field="profileName" header="Profile" sortable style="width: 11rem" />
-        <Column field="unencodedCount" header="Encoded" sortable style="width: 14rem">
-          <template #body="{ data }">
-            <div class="cov-cell">
-              <ProgressBar :value="pct(data)" :showValue="false" style="height: 6px" />
-              <span class="cov-text">
-                {{ data.encodedCount }}/{{ data.fileCount }}
-                <span v-if="data.queuedCount > 0" class="muted">· {{ data.queuedCount }} queued</span>
-              </span>
-            </div>
-          </template>
-        </Column>
-        <Column header="Status" style="width: 8rem">
-          <template #body="{ data }">
-            <Tag :value="status(data).label" :severity="status(data).severity" />
-          </template>
-        </Column>
-      </DataTable>
+        </div>
+        <DataTable
+          v-else
+          v-model:selection="selected"
+          :value="filteredItems"
+          dataKey="itemId"
+          stripedRows
+          size="small"
+          scrollable
+          scrollHeight="60vh"
+        >
+          <Column selectionMode="multiple" headerStyle="width: 3rem" />
+          <Column field="title" header="Title" sortable>
+            <template #body="{ data }">
+              <div class="title-cell">
+                <div class="title-main">{{ data.title }}</div>
+                <div class="title-path muted">{{ data.path }}</div>
+              </div>
+            </template>
+          </Column>
+          <Column field="tagLabel" header="Tag" sortable style="width: 10rem">
+            <template #body="{ data }">
+              <Tag :value="data.tagLabel" severity="secondary" />
+            </template>
+          </Column>
+          <Column field="profileName" header="Profile" sortable style="width: 11rem" />
+          <Column field="unencodedCount" header="Encoded" sortable style="width: 14rem">
+            <template #body="{ data }">
+              <div class="cov-cell">
+                <ProgressBar :value="pct(data)" :showValue="false" style="height: 6px" />
+                <span class="cov-text">
+                  {{ data.encodedCount }}/{{ data.fileCount }}
+                  <span v-if="data.queuedCount > 0" class="muted"
+                    >· {{ data.queuedCount }} queued</span
+                  >
+                </span>
+              </div>
+            </template>
+          </Column>
+          <Column header="Status" style="width: 8rem">
+            <template #body="{ data }">
+              <Tag :value="status(data).label" :severity="status(data).severity" />
+            </template>
+          </Column>
+        </DataTable>
       </template>
     </template>
   </section>

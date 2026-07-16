@@ -71,8 +71,8 @@ onMounted(load);
     <section class="block">
       <h3 class="block-title">Container output (<code>docker logs</code>)</h3>
       <p class="muted">
-        Threshold for the human-readable stream that <code>docker logs</code> shows. Lower the
-        level for less noise — file logs are unaffected. Changes apply immediately.
+        Threshold for the human-readable stream that <code>docker logs</code> shows. Lower the level
+        for less noise — file logs are unaffected. Changes apply immediately.
       </p>
       <label class="row">
         <span>App log level</span>
@@ -84,15 +84,16 @@ onMounted(load);
       <h3 class="block-title">File rotation</h3>
       <p class="muted">
         Controls <code>access.log</code>, <code>outbound.log</code>, and
-        <code>handbrake.log</code> under <code>&lt;data-dir&gt;/logs/</code>. Changes take effect
-        on next restart.
+        <code>handbrake.log</code> under <code>&lt;data-dir&gt;/logs/</code>. Changes take effect on
+        next restart.
       </p>
       <label class="row">
         <span>Enable rotation</span>
         <ToggleSwitch v-model="rotateEnabled" />
       </label>
       <p v-if="!rotateEnabled" class="muted small warn">
-        Rotation is off — log files will grow without bound. You're responsible for cleaning them up.
+        Rotation is off — log files will grow without bound. You're responsible for cleaning them
+        up.
       </p>
       <div v-if="rotateEnabled" class="form">
         <label class="row">
@@ -112,8 +113,8 @@ onMounted(load);
           <ToggleSwitch v-model="compress" />
         </label>
         <p class="muted small">
-          Set days or backups to <code>0</code> to keep forever. A single log file is capped at
-          the size above; once exceeded it's rotated and a new one is started.
+          Set days or backups to <code>0</code> to keep forever. A single log file is capped at the
+          size above; once exceeded it's rotated and a new one is started.
         </p>
       </div>
     </section>

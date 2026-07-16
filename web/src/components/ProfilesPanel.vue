@@ -53,7 +53,9 @@ function isHardware(enc: string | undefined): boolean {
   return hwPrefixes.some((p) => enc.startsWith(p));
 }
 function isAV1Hardware(enc: string | undefined): boolean {
-  return !!enc && (enc === "nvenc_av1" || enc === "qsv_av1" || enc === "vce_av1" || enc === "vaapi_av1");
+  return (
+    !!enc && (enc === "nvenc_av1" || enc === "qsv_av1" || enc === "vce_av1" || enc === "vaapi_av1")
+  );
 }
 
 const isHwEncoder = computed(() => isHardware(editing.value?.encoder));
@@ -84,27 +86,30 @@ function defaultQualityFor(enc: string | undefined): number {
   return encoderQualityDefaults[enc] ?? 22;
 }
 
-const encoderDefaults: Record<string, { preset?: string; profile?: string; tune?: string; level?: string }> = {
-  x264:            { preset: "medium",    profile: "main",   level: "auto", tune: "" },
-  x264_10bit:      { preset: "medium",    profile: "high10", level: "auto", tune: "" },
-  x265:            { preset: "medium",    profile: "main",   level: "auto", tune: "" },
-  x265_10bit:      { preset: "medium",    profile: "main10", level: "auto", tune: "" },
-  x265_12bit:      { preset: "medium",    profile: "main12", level: "auto", tune: "" },
-  svt_av1:         { preset: "6",         profile: "main",   level: "auto", tune: "" },
-  svt_av1_10bit:   { preset: "6",         profile: "main",   level: "auto", tune: "psnr" },
-  nvenc_h264:      { preset: "medium",    profile: "auto",   level: "auto" },
-  nvenc_h265:      { preset: "medium",    profile: "auto",   level: "auto" },
-  nvenc_h265_10bit:{ preset: "medium",    profile: "auto",   level: "auto" },
-  nvenc_av1:       { preset: "medium",    profile: "auto",   level: "auto" },
-  qsv_h264:        { preset: "speed",     profile: "auto",   level: "auto" },
-  qsv_h265:        { preset: "speed",     profile: "auto",   level: "auto" },
-  qsv_h265_10bit:  { preset: "speed",     profile: "auto",   level: "auto" },
-  qsv_av1:         { preset: "speed",     profile: "auto",   level: "auto" },
-  qsv_av1_10bit:   { preset: "speed",     profile: "auto",   level: "auto" },
-  vce_h264:        { preset: "balanced",  profile: "main",   level: "auto" },
-  vce_h265:        { preset: "balanced",  profile: "main",   level: "auto" },
-  vce_av1:         { preset: "balanced",  profile: "auto",   level: "auto" },
-  vce_av1_10bit:   { preset: "balanced",  profile: "auto",   level: "auto" },
+const encoderDefaults: Record<
+  string,
+  { preset?: string; profile?: string; tune?: string; level?: string }
+> = {
+  x264: { preset: "medium", profile: "main", level: "auto", tune: "" },
+  x264_10bit: { preset: "medium", profile: "high10", level: "auto", tune: "" },
+  x265: { preset: "medium", profile: "main", level: "auto", tune: "" },
+  x265_10bit: { preset: "medium", profile: "main10", level: "auto", tune: "" },
+  x265_12bit: { preset: "medium", profile: "main12", level: "auto", tune: "" },
+  svt_av1: { preset: "6", profile: "main", level: "auto", tune: "" },
+  svt_av1_10bit: { preset: "6", profile: "main", level: "auto", tune: "psnr" },
+  nvenc_h264: { preset: "medium", profile: "auto", level: "auto" },
+  nvenc_h265: { preset: "medium", profile: "auto", level: "auto" },
+  nvenc_h265_10bit: { preset: "medium", profile: "auto", level: "auto" },
+  nvenc_av1: { preset: "medium", profile: "auto", level: "auto" },
+  qsv_h264: { preset: "speed", profile: "auto", level: "auto" },
+  qsv_h265: { preset: "speed", profile: "auto", level: "auto" },
+  qsv_h265_10bit: { preset: "speed", profile: "auto", level: "auto" },
+  qsv_av1: { preset: "speed", profile: "auto", level: "auto" },
+  qsv_av1_10bit: { preset: "speed", profile: "auto", level: "auto" },
+  vce_h264: { preset: "balanced", profile: "main", level: "auto" },
+  vce_h265: { preset: "balanced", profile: "main", level: "auto" },
+  vce_av1: { preset: "balanced", profile: "auto", level: "auto" },
+  vce_av1_10bit: { preset: "balanced", profile: "auto", level: "auto" },
 };
 
 function pickIfAvailable(value: string | undefined, available: string[] | undefined): string {
@@ -184,10 +189,24 @@ const mixdownModel = computed<string>({
 });
 
 const AUDIO_DEFAULTS_AAC: Record<number, number> = {
-  1: 64, 2: 128, 3: 192, 4: 256, 5: 320, 6: 384, 7: 448, 8: 512,
+  1: 64,
+  2: 128,
+  3: 192,
+  4: 256,
+  5: 320,
+  6: 384,
+  7: 448,
+  8: 512,
 };
 const AUDIO_DEFAULTS_OPUS: Record<number, number> = {
-  1: 48, 2: 96, 3: 144, 4: 192, 5: 224, 6: 256, 7: 320, 8: 384,
+  1: 48,
+  2: 96,
+  3: 144,
+  4: 192,
+  5: 224,
+  6: 256,
+  7: 320,
+  8: 384,
 };
 function audioDefaultsFor(encoder: string | undefined): Record<number, number> {
   return encoder === "opus" ? AUDIO_DEFAULTS_OPUS : AUDIO_DEFAULTS_AAC;
@@ -325,7 +344,10 @@ async function save() {
     validationError.value = "Encoder is required.";
     return;
   }
-  if (editing.value.rateControl === "abr" && (!editing.value.videoBitrate || editing.value.videoBitrate <= 0)) {
+  if (
+    editing.value.rateControl === "abr" &&
+    (!editing.value.videoBitrate || editing.value.videoBitrate <= 0)
+  ) {
     validationError.value = "ABR mode requires a video bitrate (kbps).";
     return;
   }
@@ -407,7 +429,13 @@ onMounted(load);
       <Column header="" style="width: 8rem">
         <template #body="{ data }">
           <Button text size="small" icon="pi pi-pencil" @click="startEdit(data)" />
-          <Button text size="small" icon="pi pi-copy" title="Duplicate" @click="startDuplicate(data)" />
+          <Button
+            text
+            size="small"
+            icon="pi pi-copy"
+            title="Duplicate"
+            @click="startDuplicate(data)"
+          />
           <Button text size="small" severity="danger" icon="pi pi-trash" @click="remove(data)" />
         </template>
       </Column>
@@ -529,16 +557,20 @@ onMounted(load);
                 <span>Multi-pass</span>
                 <span class="toggle-row">
                   <ToggleSwitch v-model="editing.twoPass" />
-                  <span class="muted hint">Two passes over the source for better bitrate distribution; ~2× encode time. HandBrake calls this "multi-pass" — the underlying flag is still --two-pass.</span>
+                  <span class="muted hint"
+                    >Two passes over the source for better bitrate distribution; ~2× encode time.
+                    HandBrake calls this "multi-pass" — the underlying flag is still
+                    --two-pass.</span
+                  >
                 </span>
               </label>
               <p v-if="isAv1Hw" class="muted hint span-2">
-                AV1 hardware encoders accept only one profile (main); leave the profile field
-                empty — setting <code>main</code> as a string errors with current ffmpeg.
+                AV1 hardware encoders accept only one profile (main); leave the profile field empty
+                — setting <code>main</code> as a string errors with current ffmpeg.
               </p>
               <p v-if="isHwEncoder && editing.rateControl === 'abr'" class="muted hint span-2">
-                Hardware encoders don't support true multi-pass — Recodarr uses single-pass ABR
-                with lookahead, which is what NVENC/QSV/VCE actually do internally.
+                Hardware encoders don't support true multi-pass — Recodarr uses single-pass ABR with
+                lookahead, which is what NVENC/QSV/VCE actually do internally.
               </p>
             </div>
           </section>
@@ -617,8 +649,8 @@ onMounted(load);
               <div class="subsection-head">
                 <span class="block-title">Bitrate per channel layout (kbps)</span>
                 <span class="muted hint">
-                  {{ editing.audioEncoder === "opus" ? "Opus" : "AAC" }} defaults
-                  shown — change any row to override.
+                  {{ editing.audioEncoder === "opus" ? "Opus" : "AAC" }} defaults shown — change any
+                  row to override.
                 </span>
               </div>
               <div class="fields">
@@ -718,8 +750,8 @@ onMounted(load);
               </span>
               <span v-else-if="editing.bloatPolicy === 'keep_original'">
                 After every encode the new file's size is compared to the original. If it's not at
-                least <code>{{ editing.bloatMinSavingsPercent || 0 }}%</code> smaller, the new
-                file is discarded and the source is kept untouched. The job is marked
+                least <code>{{ editing.bloatMinSavingsPercent || 0 }}%</code> smaller, the new file
+                is discarded and the source is kept untouched. The job is marked
                 <code>skipped</code> with the size info in its reason.
               </span>
               <span v-else>
@@ -743,11 +775,7 @@ onMounted(load);
             <div class="filter-grid">
               <label class="field">
                 <span>Codec in</span>
-                <InputText
-                  v-model="editing.skipCodecs"
-                  placeholder="e.g. av1,hevc"
-                  class="mono"
-                />
+                <InputText v-model="editing.skipCodecs" placeholder="e.g. av1,hevc" class="mono" />
               </label>
               <label class="field">
                 <span>Bitrate ≤</span>

@@ -60,8 +60,7 @@ export function useEncodeProgress(opts?: { onComplete?: (jobId: number) => void 
     es.addEventListener("progress", (ev) => {
       try {
         applyEvent(JSON.parse((ev as MessageEvent).data));
-      } catch {
-      }
+      } catch {}
     });
     es.addEventListener("idle", () => {
       progressByJob.value = {};

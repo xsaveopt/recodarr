@@ -29,8 +29,8 @@ const queuing = ref(false);
 const confirmOpen = ref(false);
 const QUEUE_CONFIRM_THRESHOLD = 100;
 
-const activeInstance = computed(() =>
-  instances.value.find((i) => i.id === activeInstanceId.value) ?? null,
+const activeInstance = computed(
+  () => instances.value.find((i) => i.id === activeInstanceId.value) ?? null,
 );
 const eligibleInstances = computed(() =>
   instances.value.filter((i) => i.enabled && (i.kind === "sonarr" || i.kind === "radarr")),
@@ -45,9 +45,7 @@ const filteredItems = computed(() => {
   });
 });
 
-const selectedFileCount = computed(() =>
-  selected.value.reduce((acc, it) => acc + it.fileCount, 0),
-);
+const selectedFileCount = computed(() => selected.value.reduce((acc, it) => acc + it.fileCount, 0));
 
 async function loadInstances() {
   const list = await notify.tryRun(() => api.arr.list(), "Couldn't load *arr instances");
@@ -145,8 +143,8 @@ onMounted(async () => {
     <header class="page-head">
       <h1>Library</h1>
       <p class="muted">
-        Re-encode items already in your *arr libraries that pre-date their tag. Uses the
-        same tag→profile mappings as webhooks.
+        Re-encode items already in your *arr libraries that pre-date their tag. Uses the same
+        tag→profile mappings as webhooks.
       </p>
     </header>
 
@@ -171,11 +169,7 @@ onMounted(async () => {
       </div>
 
       <div class="toolbar">
-        <InputText
-          v-model="titleFilter"
-          placeholder="Filter by title"
-          class="filter"
-        />
+        <InputText v-model="titleFilter" placeholder="Filter by title" class="filter" />
         <label class="checkbox-row">
           <Checkbox v-model="hideProcessed" :binary="true" />
           <span>Hide items already queued or completed</span>
@@ -191,9 +185,11 @@ onMounted(async () => {
         <span class="spacer"></span>
         <Button
           icon="pi pi-play"
-          :label="selected.length === 0
-            ? 'Queue selected'
-            : `Queue ${selected.length} (${selectedFileCount} file${selectedFileCount === 1 ? '' : 's'})`"
+          :label="
+            selected.length === 0
+              ? 'Queue selected'
+              : `Queue ${selected.length} (${selectedFileCount} file${selectedFileCount === 1 ? '' : 's'})`
+          "
           :disabled="selected.length === 0 || queuing"
           :loading="queuing"
           @click="onQueueClick"
@@ -212,8 +208,8 @@ onMounted(async () => {
       <div v-else-if="filteredItems.length === 0" class="empty">
         <template v-if="items.length === 0">
           No tagged items in this library. Tag a series/movie in
-          {{ activeInstance?.kind === "sonarr" ? "Sonarr" : "Radarr" }} that matches one of
-          your mappings, then refresh.
+          {{ activeInstance?.kind === "sonarr" ? "Sonarr" : "Radarr" }} that matches one of your
+          mappings, then refresh.
         </template>
         <template v-else>
           All tagged items are already queued or processed. Uncheck the filter to re-queue.
@@ -251,7 +247,11 @@ onMounted(async () => {
         <Column header="Jobs" style="width: 9rem">
           <template #body="{ data }">
             <div class="badges">
-              <Tag v-if="data.activeJobs > 0" :value="`${data.activeJobs} pending`" severity="warn" />
+              <Tag
+                v-if="data.activeJobs > 0"
+                :value="`${data.activeJobs} pending`"
+                severity="warn"
+              />
               <Tag v-if="data.doneJobs > 0" :value="`${data.doneJobs} done`" severity="success" />
               <span v-if="data.activeJobs === 0 && data.doneJobs === 0" class="muted">—</span>
             </div>
@@ -268,8 +268,8 @@ onMounted(async () => {
     >
       <p>
         You're about to queue <strong>{{ selectedFileCount }} files</strong> across
-        <strong>{{ selected.length }} items</strong>. They'll all enter the worker queue
-        in <code>ready</code> state.
+        <strong>{{ selected.length }} items</strong>. They'll all enter the worker queue in
+        <code>ready</code> state.
       </p>
       <template #footer>
         <Button text label="Cancel" :disabled="queuing" @click="confirmOpen = false" />

@@ -4,11 +4,14 @@ services:
     image: ghcr.io/xsaveopt/recodarr:latest
     container_name: recodarr-agent
     restart: unless-stopped
+    read_only: true
     environment:
       RECODARR_MODE: agent
       RECODARR_AGENT_TOKEN: ${AGENT_TOKEN:?set AGENT_TOKEN in .env}
       RECODARR_AGENT_MAX_PARALLEL: "1"
       TZ: Europe/Amsterdam
+    tmpfs:
+      - /tmp
     volumes:
       - ./agent-data:/data
     ports:

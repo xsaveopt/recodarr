@@ -193,8 +193,8 @@ onMounted(load);
       <p class="muted small">
         After every successful encode, Recodarr drops a tiny text file beside the media file with
         the same name but the extension below. The encoded file itself is not renamed. Future
-        webhooks for any file with a matching marker are skipped so the same file can't
-        accidentally be re-encoded a second time.
+        webhooks for any file with a matching marker are skipped so the same file can't accidentally
+        be re-encoded a second time.
       </p>
       <label>
         <span>Marker extension</span>

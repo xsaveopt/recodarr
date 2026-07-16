@@ -18,7 +18,16 @@ import AgentPanel from "@/components/AgentPanel.vue";
 
 const route = useRoute();
 const router = useRouter();
-const validTabs = ["arr", "qbit", "profiles", "mappings", "worker", "notifications", "logs", "agent"] as const;
+const validTabs = [
+  "arr",
+  "qbit",
+  "profiles",
+  "mappings",
+  "worker",
+  "notifications",
+  "logs",
+  "agent",
+] as const;
 type TabValue = (typeof validTabs)[number];
 
 const activeTab = computed<TabValue>({

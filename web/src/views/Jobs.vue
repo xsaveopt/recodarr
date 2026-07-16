@@ -30,19 +30,29 @@ const selectedJobs = ref<Job[]>([]);
 const bulkBusy = ref(false);
 const rangeAnchorId = ref<number | null>(null);
 
-const CLEARABLE_STATUSES = ["done", "failed", "skipped", "waiting_for_seed", "waiting_for_hardlink", "ready"] as const;
+const CLEARABLE_STATUSES = [
+  "done",
+  "failed",
+  "skipped",
+  "waiting_for_seed",
+  "waiting_for_hardlink",
+  "ready",
+] as const;
 const clearDialogOpen = ref(false);
 const clearStatuses = ref<string[]>(["done", "failed", "skipped"]);
 
 const selectedIds = computed(() => selectedJobs.value.map((j) => j.id));
-const selectedDeletable = computed(() =>
-  selectedJobs.value.filter((j) => j.status !== "encoding").length,
+const selectedDeletable = computed(
+  () => selectedJobs.value.filter((j) => j.status !== "encoding").length,
 );
-const selectedRetryable = computed(() =>
-  selectedJobs.value.filter((j) => j.status === "failed" || j.status === "skipped" || j.status === "done").length,
+const selectedRetryable = computed(
+  () =>
+    selectedJobs.value.filter(
+      (j) => j.status === "failed" || j.status === "skipped" || j.status === "done",
+    ).length,
 );
-const selectedEditable = computed(() =>
-  selectedJobs.value.filter((j) => j.status !== "encoding").length,
+const selectedEditable = computed(
+  () => selectedJobs.value.filter((j) => j.status !== "encoding").length,
 );
 const bulkProfileId = ref<number | null>(null);
 
@@ -51,7 +61,15 @@ const bulkProfileOptions = computed(() => [
   ...profiles.value.filter((p) => !p.deleted).map((p) => ({ id: p.id, name: p.name })),
 ]);
 
-const ALL_STATUSES = ["waiting_for_seed", "waiting_for_hardlink", "ready", "encoding", "done", "failed", "skipped"] as const;
+const ALL_STATUSES = [
+  "waiting_for_seed",
+  "waiting_for_hardlink",
+  "ready",
+  "encoding",
+  "done",
+  "failed",
+  "skipped",
+] as const;
 const ALL_KINDS = ["sonarr", "radarr"] as const;
 
 function parseList(raw: string | string[] | undefined, allowed: readonly string[]): string[] {
@@ -65,7 +83,9 @@ function parseList(raw: string | string[] | undefined, allowed: readonly string[
 }
 
 const titleFilter = ref<string>((route.query.q as string) ?? "");
-const statusFilter = ref<string[]>(parseList(route.query.status as string | undefined, ALL_STATUSES));
+const statusFilter = ref<string[]>(
+  parseList(route.query.status as string | undefined, ALL_STATUSES),
+);
 const kindFilter = ref<string[]>(parseList(route.query.kind as string | undefined, ALL_KINDS));
 const profileFilter = ref<number | null>(
   route.query.profileId ? Number(route.query.profileId) : null,
@@ -266,10 +286,7 @@ async function clearByStatus() {
     return;
   }
   const picked = [...clearStatuses.value];
-  const res = await notify.tryRun(
-    () => api.jobs.clearTerminal(picked),
-    "Couldn't clear history",
-  );
+  const res = await notify.tryRun(() => api.jobs.clearTerminal(picked), "Couldn't clear history");
   if (res !== undefined) {
     if (res.deleted === 0) notify.info("Nothing to clear");
     else notify.success(`Cleared ${res.deleted} entry/entries from history`);
@@ -599,7 +616,9 @@ onUnmounted(() => {
       </Column>
       <Column header="Profile" style="width: 10rem">
         <template #body="{ data }">
-          <span v-if="data.profileId">{{ profileNameById.get(data.profileId) ?? `#${data.profileId}` }}</span>
+          <span v-if="data.profileId">{{
+            profileNameById.get(data.profileId) ?? `#${data.profileId}`
+          }}</span>
           <span v-else class="muted">—</span>
         </template>
       </Column>
@@ -781,8 +800,8 @@ onUnmounted(() => {
                 "
                 class="log-error inline"
               >
-                · {{ debugInfo.waitingForSeedCount }} jobs waiting,
-                only {{ debugInfo.seedCheckBatchLimit }} checked per tick — older IDs are processed first
+                · {{ debugInfo.waitingForSeedCount }} jobs waiting, only
+                {{ debugInfo.seedCheckBatchLimit }} checked per tick — older IDs are processed first
               </span>
             </dd>
             <dt>downloadId</dt>
@@ -792,12 +811,16 @@ onUnmounted(() => {
               <span class="muted"> · length {{ debugInfo.downloadIdLength }}</span>
             </dd>
             <dt>File path</dt>
-            <dd><code>{{ debugInfo.filePath }}</code></dd>
+            <dd>
+              <code>{{ debugInfo.filePath }}</code>
+            </dd>
             <dt>qBit configured</dt>
             <dd>{{ debugInfo.qbit.configured ? "yes" : "no" }}</dd>
             <template v-if="debugInfo.qbit.configured">
               <dt>qBit URL</dt>
-              <dd><code>{{ debugInfo.qbit.url }}</code></dd>
+              <dd>
+                <code>{{ debugInfo.qbit.url }}</code>
+              </dd>
               <dt>qBit reachable</dt>
               <dd>
                 {{ debugInfo.qbit.reachable ? "yes" : "no" }}
@@ -812,18 +835,24 @@ onUnmounted(() => {
                 </dd>
                 <dd v-else-if="debugInfo.qbit.lookup?.found">
                   <div><strong>Found.</strong></div>
-                  <div>name: <code>{{ debugInfo.qbit.lookup.name }}</code></div>
-                  <div>state: <code>{{ debugInfo.qbit.lookup.state }}</code></div>
-                  <div>category: <code>{{ debugInfo.qbit.lookup.category || "(none)" }}</code></div>
-                  <div>save path: <code>{{ debugInfo.qbit.lookup.savePath }}</code></div>
+                  <div>
+                    name: <code>{{ debugInfo.qbit.lookup.name }}</code>
+                  </div>
+                  <div>
+                    state: <code>{{ debugInfo.qbit.lookup.state }}</code>
+                  </div>
+                  <div>
+                    category: <code>{{ debugInfo.qbit.lookup.category || "(none)" }}</code>
+                  </div>
+                  <div>
+                    save path: <code>{{ debugInfo.qbit.lookup.savePath }}</code>
+                  </div>
                   <div>
                     progress:
                     <code>{{ ((debugInfo.qbit.lookup.progress ?? 0) * 100).toFixed(1) }}%</code>
                   </div>
                 </dd>
-                <dd v-else-if="debugInfo.qbit.lookup">
-                  qBit does not have this hash.
-                </dd>
+                <dd v-else-if="debugInfo.qbit.lookup">qBit does not have this hash.</dd>
                 <dd v-else class="muted">(not performed)</dd>
               </template>
             </template>
@@ -838,7 +867,9 @@ onUnmounted(() => {
                 <dd>
                   {{ debugInfo.encode.profileName }}
                   <span class="muted">· {{ debugInfo.encode.profileEncoder }}</span>
-                  <span v-if="debugInfo.encode.profileId" class="muted"> · id {{ debugInfo.encode.profileId }}</span>
+                  <span v-if="debugInfo.encode.profileId" class="muted">
+                    · id {{ debugInfo.encode.profileId }}</span
+                  >
                 </dd>
               </template>
               <template v-if="debugInfo.encode.originalBytes !== undefined">

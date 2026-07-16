@@ -37,8 +37,7 @@ async function load() {
         agentSlots.value = r.slots ?? null;
         agentActive.value = r.active ?? null;
       }
-    } catch {
-    }
+    } catch {}
   }
 }
 
@@ -101,10 +100,10 @@ onMounted(load);
 <template>
   <div class="panel">
     <p class="muted">
-      Run a second Recodarr container with <code>RECODARR_MODE=agent</code> on a host with a
-      better GPU. When enabled here, every encode is sent to the agent over HTTP and the result
-      is streamed back to replace the original file in place. Cancel and progress work
-      unchanged. See <code>docs/remote-agent.md</code> for setup.
+      Run a second Recodarr container with <code>RECODARR_MODE=agent</code> on a host with a better
+      GPU. When enabled here, every encode is sent to the agent over HTTP and the result is streamed
+      back to replace the original file in place. Cancel and progress work unchanged. See
+      <code>docs/remote-agent.md</code> for setup.
     </p>
 
     <div class="form">
@@ -141,9 +140,9 @@ onMounted(load);
       </div>
       <p v-if="agentSlots < serverMaxParallel" class="muted small warn">
         ⚠ The agent only accepts <strong>{{ agentSlots }}</strong> concurrent encode(s) but the
-        server is configured for <strong>{{ serverMaxParallel }}</strong>. Raise
-        <code>RECODARR_AGENT_MAX_PARALLEL</code> on the agent container and restart it to use the
-        full server concurrency.
+        server is configured for <strong>{{ serverMaxParallel }}</strong
+        >. Raise <code>RECODARR_AGENT_MAX_PARALLEL</code> on the agent container and restart it to
+        use the full server concurrency.
       </p>
       <p v-else-if="agentSlots > serverMaxParallel" class="muted small">
         The agent can take up to {{ agentSlots }} encodes at once, but the server only dispatches
@@ -160,9 +159,9 @@ onMounted(load);
     </p>
 
     <p class="muted small">
-      Bandwidth: each encode uploads the full source and downloads the encoded result. On
-      gigabit LAN expect ~1 GB/min each way; pick the agent over local when its GPU is fast
-      enough to make up the round-trip.
+      Bandwidth: each encode uploads the full source and downloads the encoded result. On gigabit
+      LAN expect ~1 GB/min each way; pick the agent over local when its GPU is fast enough to make
+      up the round-trip.
     </p>
 
     <div class="actions">

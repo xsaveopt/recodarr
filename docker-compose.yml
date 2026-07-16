@@ -4,10 +4,13 @@ services:
     image: recodarr:latest
     container_name: recodarr
     restart: unless-stopped
+    read_only: true
     ports:
       - "8080:8080"
     environment:
       TZ: Europe/Amsterdam
+    tmpfs:
+      - /tmp
     volumes:
       - ./data:/data
       - /srv/media:/srv/media

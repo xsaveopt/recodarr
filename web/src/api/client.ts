@@ -74,8 +74,7 @@ export const api = {
     revealWebhookSecret: (id: number) =>
       request<{ username: string; password: string }>("GET", `/arr-instances/${id}/webhook-secret`),
     library: (id: number) => request<LibraryResponse>("GET", `/arr-instances/${id}/library`),
-    scanLibrary: (id: number) =>
-      request<ScanResponse>("GET", `/arr-instances/${id}/library/scan`),
+    scanLibrary: (id: number) => request<ScanResponse>("GET", `/arr-instances/${id}/library/scan`),
     queueLibrary: (id: number, itemIds: number[]) =>
       request<LibraryQueueResponse>("POST", `/arr-instances/${id}/library/queue`, { itemIds }),
   },
@@ -128,13 +127,13 @@ export const api = {
     debug: (id: number) => request<JobDebug>("GET", `/jobs/${id}/debug`),
     remove: (id: number) => request<void>("DELETE", `/jobs/${id}`),
     clearTerminal: (statuses?: string[]) => {
-      const qs = statuses && statuses.length ? `?status=${encodeURIComponent(statuses.join(","))}` : "";
+      const qs =
+        statuses && statuses.length ? `?status=${encodeURIComponent(statuses.join(","))}` : "";
       return request<{ deleted: number }>("DELETE", `/jobs${qs}`);
     },
     bulkDelete: (ids: number[]) =>
       request<{ deleted: number }>("POST", "/jobs/bulk-delete", { ids }),
-    bulkRetry: (ids: number[]) =>
-      request<{ retried: number }>("POST", "/jobs/bulk-retry", { ids }),
+    bulkRetry: (ids: number[]) => request<{ retried: number }>("POST", "/jobs/bulk-retry", { ids }),
     bulkSetProfile: (ids: number[], profileId: number) =>
       request<{ updated: number }>("POST", "/jobs/bulk-set-profile", { ids, profileId }),
   },
