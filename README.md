@@ -22,9 +22,9 @@ Auto re-encodes downloaded series and movies via HandBrake. Sits alongside Sonar
 
 ## How it works
 
-Sonarr or Radarr imports a file and POSTs a webhook to Recodarr. If the item carries a tag that you've mapped to a profile, Recodarr queues a job. Every 30 seconds the worker checks qBittorrent: when the torrent is no longer seeding, the job becomes ready. The worker then runs HandBrakeCLI on the imported library file, writes to a sibling temp file, and atomically renames over the original. Finally it asks \*arr to refresh so the new file size shows up.
+Recodarr polls your Sonarr/Radarr libraries on a schedule (every 5 minutes by default). Any item carrying a tag you've mapped to a profile gets a job queued. Every 30 seconds the worker checks qBittorrent: when the torrent is no longer seeding, the job becomes ready. The worker then runs HandBrakeCLI on the imported library file, writes to a sibling temp file, and atomically renames over the original. Finally it asks \*arr to refresh so the new file size shows up.
 
-Files without a mapped tag are ignored.
+Items without a mapped tag are ignored. Newly added or upgraded files are picked up on the next poll.
 
 ## First-run setup
 
@@ -60,13 +60,7 @@ The image is self-contained — HandBrakeCLI, ffprobe, VAAPI/QSV userspace and M
 
 2. **qBittorrent**: Settings, qBittorrent. Add your qBit URL and credentials. Without this, jobs sit in `waiting_for_seed` forever.
 
-3. **Sonarr / Radarr**: Settings, Sonarr / Radarr. Add an instance. After saving, click **Show** on the instance row to reveal the webhook URL plus a generated username and password. In \*arr, go to Settings, Connect, add a Webhook with:
-   - URL: as shown
-   - Method: POST
-   - Triggers: tick **On File Import** (and **On File Upgrade** if you also want re-encodes after a quality upgrade)
-   - Username and Password: as shown
-
-   Auth is required. Unauthenticated webhooks are rejected.
+3. **Sonarr / Radarr**: Settings, Sonarr / Radarr. Add an instance with its URL and API key; Recodarr polls the library over that connection.
 
 4. **Tag your items**: in \*arr, create a tag (e.g. `recodarr`) and apply it to the series or movies you want re-encoded.
 

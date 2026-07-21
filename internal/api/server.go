@@ -10,7 +10,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	"github.com/xsaveopt/recodarr/internal/arr"
 	"github.com/xsaveopt/recodarr/internal/auth"
 	"github.com/xsaveopt/recodarr/internal/health"
 	"github.com/xsaveopt/recodarr/internal/job"
@@ -57,12 +56,6 @@ func NewRouter(st *store.Store, worker *job.Worker, hc *health.Checker, lls LogL
 	})
 
 	r.Method("GET", "/metrics", metrics.Handler(st, worker, os.Getenv("RECODARR_METRICS_TOKEN")))
-
-	r.Route("/webhook", func(r chi.Router) {
-		r.Use(maxBody(1 << 20))
-		r.Post("/sonarr/{id}", handleArrWebhook(st, arr.KindSonarr))
-		r.Post("/radarr/{id}", handleArrWebhook(st, arr.KindRadarr))
-	})
 
 	r.Handle("/*", spaHandler(assets))
 

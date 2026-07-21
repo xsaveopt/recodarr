@@ -11,12 +11,12 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/xsaveopt/recodarr/internal/agent"
 	"github.com/xsaveopt/recodarr/internal/arr"
@@ -42,22 +42,20 @@ type workerClient interface {
 }
 
 type arrInstanceDTO struct {
-	ID            int64  `json:"id"`
-	Kind          string `json:"kind"`
-	Name          string `json:"name"`
-	URL           string `json:"url"`
-	APIKey        string `json:"apiKey,omitempty"`
-	Enabled       bool   `json:"enabled"`
-	WebhookSecret string `json:"webhookSecret,omitempty"`
-	HasAPIKey     bool   `json:"hasApiKey"`
-	HasSecret     bool   `json:"hasWebhookSecret"`
-	Deleted       bool   `json:"deleted"`
+	ID        int64  `json:"id"`
+	Kind      string `json:"kind"`
+	Name      string `json:"name"`
+	URL       string `json:"url"`
+	APIKey    string `json:"apiKey,omitempty"`
+	Enabled   bool   `json:"enabled"`
+	HasAPIKey bool   `json:"hasApiKey"`
+	Deleted   bool   `json:"deleted"`
 }
 
 func (d arrInstanceDTO) toRow() store.ArrInstanceRow {
 	return store.ArrInstanceRow{
 		ID: d.ID, Kind: d.Kind, Name: d.Name, URL: d.URL, APIKey: d.APIKey,
-		Enabled: d.Enabled, WebhookSecret: d.WebhookSecret,
+		Enabled: d.Enabled,
 	}
 }
 
@@ -66,7 +64,6 @@ func arrRowToDTO(r store.ArrInstanceRow) arrInstanceDTO {
 		ID: r.ID, Kind: r.Kind, Name: r.Name, URL: r.URL,
 		Enabled:   r.Enabled,
 		HasAPIKey: r.APIKey != "",
-		HasSecret: r.WebhookSecret != "",
 		Deleted:   r.DeletedAt.Valid,
 	}
 }
@@ -223,15 +220,11 @@ func registerAdminRoutes(r chi.Router, st *store.Store, w workerClient, hc *heal
 		r.Get("/", listArrInstances(st))
 		r.Post("/", createArrInstance(st))
 		r.Get("/all-tags", listAllArrTags(st))
+		r.Get("/unmapped-tags", listUnmappedTags(st))
 		r.Put("/{id}", updateArrInstance(st))
 		r.Delete("/{id}", deleteArrInstance(st))
 		r.Post("/{id}/test", testArrInstance(st))
 		r.Get("/{id}/tags", listArrTags(st))
-		r.Get("/{id}/library", listArrLibrary(st))
-		r.Get("/{id}/library/scan", scanArrLibrary(st))
-		r.Post("/{id}/library/queue", queueArrLibrary(st))
-
-		r.Get("/{id}/webhook-secret", revealArrWebhookSecret(st))
 	})
 
 	r.Route("/tag-mappings", func(r chi.Router) {
@@ -352,6 +345,13 @@ func putSettings(st *store.Store, lls LogLevelSetter) http.HandlerFunc {
 				http.Error(w,
 					fmt.Sprintf("max_parallel_encodes: expected integer 1..%d", store.MaxParallelEncodesCap),
 					http.StatusBadRequest)
+				return
+			}
+		}
+		if v, ok := m["reconcile_interval_seconds"]; ok {
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 60 || n > 86400 {
+				http.Error(w, "reconcile_interval_seconds: expected integer 60..86400", http.StatusBadRequest)
 				return
 			}
 		}
@@ -551,445 +551,74 @@ func listArrTags(st *store.Store) http.HandlerFunc {
 	}
 }
 
-type libraryItemDTO struct {
-	ItemID      int64  `json:"itemId"`
-	Title       string `json:"title"`
-	Path        string `json:"path"`
-	TagID       int64  `json:"tagId"`
-	TagLabel    string `json:"tagLabel"`
-	ProfileID   int64  `json:"profileId"`
-	ProfileName string `json:"profileName"`
-	FileCount   int    `json:"fileCount"`
-	TotalSize   int64  `json:"totalSize"`
-	ActiveJobs  int    `json:"activeJobs"`
-	DoneJobs    int    `json:"doneJobs"`
+type unmappedTagDTO struct {
+	InstanceID   int64  `json:"instanceId"`
+	InstanceName string `json:"instanceName"`
+	Kind         string `json:"kind"`
+	TagID        int64  `json:"tagId"`
+	TagLabel     string `json:"tagLabel"`
+	ItemCount    int    `json:"itemCount"`
 }
 
-type libraryResponseDTO struct {
-	Items      []libraryItemDTO `json:"items"`
-	NoMappings bool             `json:"noMappings"`
-}
-
-func listArrLibrary(st *store.Store) http.HandlerFunc {
+func listUnmappedTags(st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-		if err != nil {
-			http.Error(w, "bad id", http.StatusBadRequest)
-			return
-		}
-		inst, err := st.GetArrInstance(r.Context(), id)
-		if err != nil {
-			http.Error(w, "instance not found", http.StatusNotFound)
-			return
-		}
-		if inst.Kind != "sonarr" && inst.Kind != "radarr" {
-			http.Error(w, "unsupported instance kind", http.StatusBadRequest)
-			return
-		}
-
-		mappings, err := st.ListTagMappingsByKind(r.Context(), inst.Kind)
+		instances, err := st.ListArrInstances(r.Context())
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		if len(mappings) == 0 {
-			writeJSON(w, http.StatusOK, libraryResponseDTO{Items: []libraryItemDTO{}, NoMappings: true})
-			return
-		}
-
-		mapByTagID := make(map[int64]store.TagMappingRow, len(mappings))
-		for _, mp := range mappings {
-			if _, exists := mapByTagID[mp.TagID]; !exists {
-				mapByTagID[mp.TagID] = mp
-			}
-		}
-
-		profiles, err := st.ListProfiles(r.Context())
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		profileNames := make(map[int64]string, len(profiles))
-		for _, p := range profiles {
-			profileNames[p.ID] = p.Name
-		}
-
-		client := arr.New(arr.Kind(inst.Kind), inst.URL, inst.APIKey)
-		items, err := client.Library(r.Context())
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-
-		tags, err := client.Tags(r.Context())
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-		tagLabels := make(map[int64]string, len(tags))
-		for _, t := range tags {
-			tagLabels[t.ID] = t.Label
-		}
-
-		type pending struct {
-			item     arr.LibraryItem
-			mapping  store.TagMappingRow
-			tagLabel string
-		}
-		filtered := make([]pending, 0, len(items))
-		parentIDs := make([]int64, 0, len(items))
-		for _, it := range items {
-			for _, tid := range it.TagIDs {
-				if mp, ok := mapByTagID[tid]; ok {
-					filtered = append(filtered, pending{item: it, mapping: mp, tagLabel: tagLabels[tid]})
-					parentIDs = append(parentIDs, it.ID)
-					break
-				}
-			}
-		}
-
-		summaries, err := st.JobSummaryByParent(r.Context(), inst.Kind, inst.ID, parentIDs)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		out := make([]libraryItemDTO, 0, len(filtered))
-		for _, f := range filtered {
-			s := summaries[f.item.ID]
-			out = append(out, libraryItemDTO{
-				ItemID:      f.item.ID,
-				Title:       f.item.Title,
-				Path:        f.item.Path,
-				TagID:       f.mapping.TagID,
-				TagLabel:    f.tagLabel,
-				ProfileID:   f.mapping.ProfileID,
-				ProfileName: profileNames[f.mapping.ProfileID],
-				FileCount:   f.item.FileCount,
-				TotalSize:   f.item.TotalSize,
-				ActiveJobs:  s.Active,
-				DoneJobs:    s.Done,
-			})
-		}
-		writeJSON(w, http.StatusOK, libraryResponseDTO{Items: out})
-	}
-}
-
-type scanItemDTO struct {
-	ItemID         int64  `json:"itemId"`
-	Title          string `json:"title"`
-	Path           string `json:"path"`
-	TagLabel       string `json:"tagLabel"`
-	ProfileName    string `json:"profileName"`
-	FileCount      int    `json:"fileCount"`
-	EncodedCount   int    `json:"encodedCount"`
-	QueuedCount    int    `json:"queuedCount"`
-	UnencodedCount int    `json:"unencodedCount"`
-}
-
-type scanResponseDTO struct {
-	Items          []scanItemDTO `json:"items"`
-	NoMappings     bool          `json:"noMappings"`
-	SuffixDisabled bool          `json:"suffixDisabled"`
-}
-
-func scanArrLibrary(st *store.Store) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-		if err != nil {
-			http.Error(w, "bad id", http.StatusBadRequest)
-			return
-		}
-		inst, err := st.GetArrInstance(r.Context(), id)
-		if err != nil {
-			http.Error(w, "instance not found", http.StatusNotFound)
-			return
-		}
-		if inst.Kind != "sonarr" && inst.Kind != "radarr" {
-			http.Error(w, "unsupported instance kind", http.StatusBadRequest)
-			return
-		}
-
-		cfg, err := st.LoadAppSettings(r.Context())
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if !cfg.OutputSuffixEnabled {
-			writeJSON(w, http.StatusOK, scanResponseDTO{Items: []scanItemDTO{}, SuffixDisabled: true})
-			return
-		}
-
-		mappings, err := st.ListTagMappingsByKind(r.Context(), inst.Kind)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if len(mappings) == 0 {
-			writeJSON(w, http.StatusOK, scanResponseDTO{Items: []scanItemDTO{}, NoMappings: true})
-			return
-		}
-		mapByTagID := make(map[int64]store.TagMappingRow, len(mappings))
-		for _, mp := range mappings {
-			if _, exists := mapByTagID[mp.TagID]; !exists {
-				mapByTagID[mp.TagID] = mp
-			}
-		}
-
-		profiles, err := st.ListProfiles(r.Context())
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		profileNames := make(map[int64]string, len(profiles))
-		for _, p := range profiles {
-			profileNames[p.ID] = p.Name
-		}
-
-		client := arr.New(arr.Kind(inst.Kind), inst.URL, inst.APIKey)
-		items, err := client.Library(r.Context())
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-		tags, err := client.Tags(r.Context())
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-		tagLabels := make(map[int64]string, len(tags))
-		for _, t := range tags {
-			tagLabels[t.ID] = t.Label
-		}
-
-		out := make([]scanItemDTO, 0, len(items))
-		for _, it := range items {
-			for _, tid := range it.TagIDs {
-				mp, ok := mapByTagID[tid]
-				if !ok {
-					continue
-				}
-				out = append(out, scanItemDTO{
-					ItemID:      it.ID,
-					Title:       it.Title,
-					Path:        it.Path,
-					TagLabel:    tagLabels[tid],
-					ProfileName: profileNames[mp.ProfileID],
-					FileCount:   it.FileCount,
-				})
-				break
-			}
-		}
-
-		activeIDs, err := st.ActiveJobItemIDs(r.Context(), inst.Kind, inst.ID)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		g, ctx := errgroup.WithContext(r.Context())
-		g.SetLimit(6)
-		for i := range out {
-			i := i
-			g.Go(func() error {
-				files, err := client.Files(ctx, out[i].ItemID)
-				if err != nil {
-					return fmt.Errorf("item %d (%s): %w", out[i].ItemID, out[i].Title, err)
-				}
-				out[i].FileCount = len(files)
-				for _, f := range files {
-					switch {
-					case sidecarExists(f.Path, cfg.OutputSuffix):
-						out[i].EncodedCount++
-					case activeIDs[f.ID]:
-						out[i].QueuedCount++
-					default:
-						out[i].UnencodedCount++
-					}
-				}
-				return nil
-			})
-		}
-		if err := g.Wait(); err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-
-		writeJSON(w, http.StatusOK, scanResponseDTO{Items: out})
-	}
-}
-
-type queueLibraryRequest struct {
-	ItemIDs []int64 `json:"itemIds"`
-}
-
-type queueLibraryResponse struct {
-	Inserted int      `json:"inserted"`
-	Skipped  int      `json:"skipped"`
-	Errors   []string `json:"errors,omitempty"`
-}
-
-func queueArrLibrary(st *store.Store) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-		if err != nil {
-			http.Error(w, "bad id", http.StatusBadRequest)
-			return
-		}
-		inst, err := st.GetArrInstance(r.Context(), id)
-		if err != nil {
-			http.Error(w, "instance not found", http.StatusNotFound)
-			return
-		}
-		if inst.Kind != "sonarr" && inst.Kind != "radarr" {
-			http.Error(w, "unsupported instance kind", http.StatusBadRequest)
-			return
-		}
-		var req queueLibraryRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "bad json", http.StatusBadRequest)
-			return
-		}
-		if len(req.ItemIDs) == 0 {
-			writeJSON(w, http.StatusOK, queueLibraryResponse{})
-			return
-		}
-
-		cfg, err := st.LoadAppSettings(r.Context())
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		mappings, err := st.ListTagMappingsByKind(r.Context(), inst.Kind)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if len(mappings) == 0 {
-			http.Error(w, "no tag mappings configured for this instance kind", http.StatusBadRequest)
-			return
-		}
-		mapByTagID := make(map[int64]store.TagMappingRow, len(mappings))
-		for _, mp := range mappings {
-			if _, exists := mapByTagID[mp.TagID]; !exists {
-				mapByTagID[mp.TagID] = mp
-			}
-		}
-
-		client := arr.New(arr.Kind(inst.Kind), inst.URL, inst.APIKey)
-		items, err := client.Library(r.Context())
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-		type eligibleItem struct {
-			title    string
-			mapping  store.TagMappingRow
-			tagLabel string
-		}
-		eligible := make(map[int64]eligibleItem, len(items))
-		for _, it := range items {
-			for _, tid := range it.TagIDs {
-				if mp, ok := mapByTagID[tid]; ok {
-					eligible[it.ID] = eligibleItem{title: it.Title, mapping: mp, tagLabel: mp.TagLabel}
-					break
-				}
-			}
-		}
-
-		requested := make(map[int64]struct{}, len(req.ItemIDs))
-		for _, pid := range req.ItemIDs {
-			requested[pid] = struct{}{}
-		}
-
-		resp := queueLibraryResponse{}
-		for pid := range requested {
-			meta, ok := eligible[pid]
-			if !ok {
-				resp.Skipped++
-				resp.Errors = append(resp.Errors, fmt.Sprintf("item %d: not eligible (untagged, missing, or mapping removed)", pid))
+		out := []unmappedTagDTO{}
+		for _, inst := range instances {
+			if !inst.Enabled || (inst.Kind != "sonarr" && inst.Kind != "radarr") {
 				continue
 			}
-			files, err := client.Files(r.Context(), pid)
+			mappings, err := st.ListTagMappingsByKind(r.Context(), inst.Kind)
 			if err != nil {
-				resp.Errors = append(resp.Errors, fmt.Sprintf("item %d: list files: %v", pid, err))
 				continue
 			}
-
-			imports, herr := client.ImportHistory(r.Context(), pid)
-			if herr != nil {
-				slog.Warn("backfill: import history lookup failed; falling back to hardlink wait",
-					"kind", inst.Kind, "parent", pid, "err", herr)
+			mapped := make(map[int64]struct{}, len(mappings))
+			for _, mp := range mappings {
+				mapped[mp.TagID] = struct{}{}
 			}
-			tagsJSON, _ := json.Marshal([]string{meta.tagLabel})
-			for _, f := range files {
-				clean, err := sanitizeMediaPath(f.Path)
-				if err != nil {
-					resp.Skipped++
-					resp.Errors = append(resp.Errors, fmt.Sprintf("file %s: %v", f.Path, err))
-					continue
+			client := arr.New(arr.Kind(inst.Kind), inst.URL, inst.APIKey)
+			items, err := client.Library(r.Context())
+			if err != nil {
+				continue
+			}
+			counts := make(map[int64]int)
+			for _, it := range items {
+				for _, tid := range it.TagIDs {
+					if _, ok := mapped[tid]; ok {
+						continue
+					}
+					counts[tid]++
 				}
-
-				if cfg.OutputSuffixEnabled && sidecarExists(clean, cfg.OutputSuffix) {
-					resp.Skipped++
-					continue
-				}
-
-				downloadID := arr.MatchImportDownloadID(imports, arr.Kind(inst.Kind), clean, f.RelativePath)
-				status := string(job.StatusWaitingForHardlink)
-				if downloadID != "" {
-					status = string(job.StatusWaitingForSeed)
-				}
-				jr := store.JobRow{
-					ArrKind:       inst.Kind,
-					ArrInstanceID: inst.ID,
-					ArrItemID:     f.ID,
-					ArrParentID:   pid,
-					Title:         meta.title,
-					FilePath:      clean,
-					FileSize:      f.Size,
-					DownloadID:    downloadID,
-					ProfileID:     sql.NullInt64{Int64: meta.mapping.ProfileID, Valid: true},
-					Status:        status,
-					Tags:          string(tagsJSON),
-					Source:        "backfill",
-				}
-				newID, err := enqueueIfNew(r.Context(), st, jr)
-				if err != nil {
-					resp.Errors = append(resp.Errors, fmt.Sprintf("file %s: insert: %v", f.Path, err))
-					continue
-				}
-				if newID == 0 {
-					resp.Skipped++
-					continue
-				}
-				resp.Inserted++
+			}
+			if len(counts) == 0 {
+				continue
+			}
+			tags, err := client.Tags(r.Context())
+			if err != nil {
+				continue
+			}
+			labels := make(map[int64]string, len(tags))
+			for _, t := range tags {
+				labels[t.ID] = t.Label
+			}
+			for tid, n := range counts {
+				out = append(out, unmappedTagDTO{
+					InstanceID: inst.ID, InstanceName: inst.Name, Kind: inst.Kind,
+					TagID: tid, TagLabel: labels[tid], ItemCount: n,
+				})
 			}
 		}
-		slog.Info("library backfill",
-			"kind", inst.Kind, "instance", inst.ID,
-			"requested", len(requested), "inserted", resp.Inserted, "skipped", resp.Skipped)
-		writeJSON(w, http.StatusOK, resp)
-	}
-}
-
-func revealArrWebhookSecret(st *store.Store) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-		if err != nil {
-			http.Error(w, "bad id", http.StatusBadRequest)
-			return
-		}
-		inst, err := st.GetArrInstance(r.Context(), id)
-		if err != nil {
-			http.Error(w, "instance not found", http.StatusNotFound)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]string{
-			"username": WebhookBasicAuthUser,
-			"password": inst.WebhookSecret,
+		sort.Slice(out, func(i, j int) bool {
+			if out[i].InstanceID != out[j].InstanceID {
+				return out[i].InstanceID < out[j].InstanceID
+			}
+			return out[i].TagLabel < out[j].TagLabel
 		})
+		writeJSON(w, http.StatusOK, out)
 	}
 }
 
@@ -1495,7 +1124,7 @@ func rowToJobDTO(row store.JobRow) jobDTO {
 		Source: row.Source,
 	}
 	if d.Source == "" {
-		d.Source = "webhook"
+		d.Source = "poll"
 	}
 	if row.ProfileID.Valid {
 		v := row.ProfileID.Int64

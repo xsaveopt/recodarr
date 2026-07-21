@@ -6,10 +6,8 @@ export interface ArrInstance {
   name: string;
   url: string;
   apiKey?: string;
-  webhookSecret?: string;
   enabled: boolean;
   hasApiKey: boolean;
-  hasWebhookSecret: boolean;
   deleted: boolean;
 }
 
@@ -74,6 +72,15 @@ export interface InstanceTag {
   tagLabel: string;
 }
 
+export interface UnmappedTag {
+  instanceId: number;
+  instanceName: string;
+  kind: "sonarr" | "radarr";
+  tagId: number;
+  tagLabel: string;
+  itemCount: number;
+}
+
 export interface EncoderCaps {
   name: string;
   presets: string[];
@@ -128,50 +135,7 @@ export interface Job {
   finishedAt?: string;
   originalSize?: number;
   finalSize?: number;
-  source: "webhook" | "backfill";
-}
-
-export interface LibraryItem {
-  itemId: number;
-  title: string;
-  path: string;
-  tagId: number;
-  tagLabel: string;
-  profileId: number;
-  profileName: string;
-  fileCount: number;
-  totalSize: number;
-  activeJobs: number;
-  doneJobs: number;
-}
-
-export interface LibraryResponse {
-  items: LibraryItem[];
-  noMappings: boolean;
-}
-
-export interface LibraryQueueResponse {
-  inserted: number;
-  skipped: number;
-  errors?: string[];
-}
-
-export interface ScanItem {
-  itemId: number;
-  title: string;
-  path: string;
-  tagLabel: string;
-  profileName: string;
-  fileCount: number;
-  encodedCount: number;
-  queuedCount: number;
-  unencodedCount: number;
-}
-
-export interface ScanResponse {
-  items: ScanItem[];
-  noMappings: boolean;
-  suffixDisabled: boolean;
+  source: string;
 }
 
 export interface JobListParams {
@@ -288,6 +252,7 @@ export interface HealthSnapshot {
 
 export interface AppSettings {
   worker_interval_seconds?: string;
+  reconcile_interval_seconds?: string;
   max_parallel_encodes?: string;
   encoding_window_start?: string;
   encoding_window_end?: string;

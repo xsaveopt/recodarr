@@ -43,19 +43,6 @@ type Tag struct {
 	Label string `json:"label"`
 }
 
-type Item struct {
-	EventType    string
-	ParentID     int64
-	ParentTitle  string
-	ParentPath   string
-	ParentTags   []string
-	FileID       int64
-	FilePath     string
-	RelativePath string
-	Size         int64
-	DownloadID   string
-}
-
 func (c *Client) Tags(ctx context.Context) ([]Tag, error) {
 	var tags []Tag
 	if err := c.getJSON(ctx, "/api/v3/tag", &tags); err != nil {
@@ -330,79 +317,4 @@ func (c *Client) getJSON(ctx context.Context, path string, out any) error {
 		return fmt.Errorf("status=%d", resp.StatusCode)
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
-}
-
-type sonarrPayload struct {
-	EventType string `json:"eventType"`
-	Series    struct {
-		ID    int64    `json:"id"`
-		Title string   `json:"title"`
-		Path  string   `json:"path"`
-		Tags  []string `json:"tags,omitempty"`
-	} `json:"series"`
-	EpisodeFile struct {
-		ID           int64  `json:"id"`
-		RelativePath string `json:"relativePath"`
-		Path         string `json:"path"`
-		Size         int64  `json:"size"`
-	} `json:"episodeFile"`
-	DownloadID string `json:"downloadId"`
-}
-
-type radarrPayload struct {
-	EventType string `json:"eventType"`
-	Movie     struct {
-		ID         int64    `json:"id"`
-		Title      string   `json:"title"`
-		FolderPath string   `json:"folderPath"`
-		Tags       []string `json:"tags,omitempty"`
-	} `json:"movie"`
-	MovieFile struct {
-		ID           int64  `json:"id"`
-		RelativePath string `json:"relativePath"`
-		Path         string `json:"path"`
-		Size         int64  `json:"size"`
-	} `json:"movieFile"`
-	DownloadID string `json:"downloadId"`
-}
-
-func ParseWebhook(kind Kind, body []byte) (*Item, error) {
-	switch kind {
-	case KindSonarr:
-		var p sonarrPayload
-		if err := json.Unmarshal(body, &p); err != nil {
-			return nil, err
-		}
-		return &Item{
-			EventType:    p.EventType,
-			ParentID:     p.Series.ID,
-			ParentTitle:  p.Series.Title,
-			ParentPath:   p.Series.Path,
-			ParentTags:   p.Series.Tags,
-			FileID:       p.EpisodeFile.ID,
-			FilePath:     p.EpisodeFile.Path,
-			RelativePath: p.EpisodeFile.RelativePath,
-			Size:         p.EpisodeFile.Size,
-			DownloadID:   p.DownloadID,
-		}, nil
-	case KindRadarr:
-		var p radarrPayload
-		if err := json.Unmarshal(body, &p); err != nil {
-			return nil, err
-		}
-		return &Item{
-			EventType:    p.EventType,
-			ParentID:     p.Movie.ID,
-			ParentTitle:  p.Movie.Title,
-			ParentPath:   p.Movie.FolderPath,
-			ParentTags:   p.Movie.Tags,
-			FileID:       p.MovieFile.ID,
-			FilePath:     p.MovieFile.Path,
-			RelativePath: p.MovieFile.RelativePath,
-			Size:         p.MovieFile.Size,
-			DownloadID:   p.DownloadID,
-		}, nil
-	default:
-		return nil, fmt.Errorf("unknown arr kind %q", kind)
-	}
 }

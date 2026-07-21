@@ -147,7 +147,7 @@ func (c *Checker) probe(ctx context.Context) Snapshot {
 			Level:  LevelWarn,
 			Source: "config",
 			Title:  "No tag mappings configured",
-			Detail: "Webhooks without a mapped tag are ignored. Add a mapping in Settings → Mappings to start encoding.",
+			Detail: "Recodarr only queues library items whose tag has a mapping. Add a mapping in Settings → Mappings to start encoding.",
 		})
 	}
 

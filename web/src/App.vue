@@ -89,8 +89,6 @@ const themeLabel = computed(() =>
 const navItems = [
   { to: "/", label: "Dashboard" },
   { to: "/jobs", label: "Jobs" },
-  { to: "/library", label: "Library" },
-  { to: "/coverage", label: "Coverage" },
   { to: "/settings", label: "Settings" },
   { to: "/debug", label: "Debug" },
 ];

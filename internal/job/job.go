@@ -272,6 +272,7 @@ func (w *Worker) WindowStatus(ctx context.Context) WindowStatus {
 
 func (w *Worker) Run(ctx context.Context) {
 	slog.Info("worker started")
+	go w.runReconcile(ctx)
 	w.tick(ctx)
 	for {
 		interval := w.readInterval(ctx)

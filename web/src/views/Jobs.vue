@@ -605,12 +605,6 @@ onUnmounted(() => {
         <template #body="{ data }">
           <div class="source-cell">
             <Tag :value="data.arrKind" :severity="data.arrKind === 'sonarr' ? 'info' : 'warn'" />
-            <Tag
-              v-if="data.source === 'backfill'"
-              value="backfill"
-              severity="secondary"
-              title="Manually queued from the Library page"
-            />
           </div>
         </template>
       </Column>

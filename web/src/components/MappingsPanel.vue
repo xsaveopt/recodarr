@@ -8,12 +8,13 @@ import Tag from "primevue/tag";
 
 import { api } from "@/api/client";
 import { useNotify } from "@/composables/useNotify";
-import type { TagMapping, InstanceTag, Profile } from "@/types/api";
+import type { TagMapping, InstanceTag, Profile, UnmappedTag } from "@/types/api";
 
 const notify = useNotify();
 const mappings = ref<TagMapping[]>([]);
 const profiles = ref<Profile[]>([]);
 const availableTags = ref<InstanceTag[]>([]);
+const unmappedTags = ref<UnmappedTag[]>([]);
 const loadingTags = ref(false);
 const validationError = ref<string | null>(null);
 
@@ -54,6 +55,20 @@ async function fetchTags() {
   }
 }
 
+async function fetchUnmapped() {
+  try {
+    unmappedTags.value = (await api.arr.unmappedTags()) ?? [];
+  } catch {
+    unmappedTags.value = [];
+  }
+}
+
+function mapUnmapped(u: UnmappedTag) {
+  newKind.value = u.kind;
+  newTag.value =
+    availableTags.value.find((t) => t.instanceId === u.instanceId && t.tagId === u.tagId) ?? null;
+}
+
 async function add() {
   validationError.value = null;
   if (!newKind.value) {
@@ -84,6 +99,7 @@ async function add() {
     newTag.value = null;
     newProfileId.value = null;
     notify.success(`Added mapping for ${m.tagLabel}`);
+    void fetchUnmapped();
   }
 }
 
@@ -98,6 +114,7 @@ function remove(m: TagMapping) {
       );
       if (ok) {
         mappings.value = mappings.value.filter((x) => x.id !== m.id);
+        void fetchUnmapped();
       }
     },
   });
@@ -116,15 +133,35 @@ function kindSeverity(kind: string) {
 onMounted(() => {
   void load();
   void fetchTags();
+  void fetchUnmapped();
 });
 </script>
 
 <template>
   <div class="panel">
     <p class="muted">
-      Tag → profile mappings are evaluated on every incoming webhook. Add a tag from Sonarr, Radarr,
-      or both — items carrying that tag will be queued with the chosen profile.
+      Tag → profile mappings gate what Recodarr queues when it polls your *arr libraries. Add a tag
+      from Sonarr, Radarr, or both — items carrying that tag will be queued with the chosen profile.
     </p>
+
+    <div v-if="unmappedTags.length" class="unmapped">
+      <div class="unmapped-head">
+        <i class="pi pi-exclamation-triangle" />
+        <span
+          >Tags applied to library items but not mapped — these items are currently skipped:</span
+        >
+      </div>
+      <ul class="unmapped-list">
+        <li v-for="u in unmappedTags" :key="u.instanceId + ':' + u.tagId">
+          <Tag :value="u.kind" :severity="kindSeverity(u.kind)" />
+          <code>{{ u.tagLabel }}</code>
+          <span class="muted small"
+            >· {{ u.instanceName }} · {{ u.itemCount }} item{{ u.itemCount === 1 ? "" : "s" }}</span
+          >
+          <Button text size="small" label="Map" icon="pi pi-plus" @click="mapUnmapped(u)" />
+        </li>
+      </ul>
+    </div>
 
     <DataTable :value="mappings" stripedRows size="small" class="mapping-table">
       <template #empty>
@@ -207,6 +244,38 @@ onMounted(() => {
 }
 .mapping-table {
   width: 100%;
+}
+.unmapped {
+  border: 1px solid var(--app-warn-fg, #d39e00);
+  border-radius: 6px;
+  padding: 0.6rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.unmapped-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  color: var(--app-warn-fg, #d39e00);
+}
+.unmapped-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.unmapped-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.small {
+  font-size: 0.8rem;
 }
 .add-row {
   display: flex;

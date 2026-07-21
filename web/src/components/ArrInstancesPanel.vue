@@ -54,15 +54,13 @@ function startCreate() {
     url: "",
     apiKey: "",
     enabled: true,
-    webhookSecret: "",
     hasApiKey: false,
-    hasWebhookSecret: false,
   };
 }
 
 function startEdit(row: ArrInstance) {
   validationError.value = null;
-  editing.value = { ...row, apiKey: "", webhookSecret: "" };
+  editing.value = { ...row, apiKey: "" };
 }
 
 async function save() {
@@ -81,7 +79,6 @@ async function save() {
     validationError.value = "API key is required.";
     return;
   }
-  const isCreate = !e.id;
   const saved = await notify.tryRun(async () => {
     return e.id
       ? await api.arr.update(e as ArrInstance)
@@ -91,9 +88,6 @@ async function save() {
     notify.success(`Saved ${e.name}`);
     editing.value = null;
     await load();
-    if (isCreate && saved.id) {
-      await openConnect({ ...(saved as ArrInstance) });
-    }
   }
 }
 
@@ -129,32 +123,6 @@ async function testConnection(row: ArrInstance) {
   }
 }
 
-function webhookURL(row: ArrInstance) {
-  return `${window.location.origin}/webhook/${row.kind}/${row.id}`;
-}
-
-const connectFor = ref<ArrInstance | null>(null);
-const connectUser = ref<string>("");
-const connectPass = ref<string>("");
-const connectLoading = ref(false);
-
-async function openConnect(row: ArrInstance) {
-  connectFor.value = row;
-  connectUser.value = "";
-  connectPass.value = "";
-  connectLoading.value = true;
-  try {
-    const r = await api.arr.revealWebhookSecret(row.id);
-    connectUser.value = r.username;
-    connectPass.value = r.password;
-  } catch (e) {
-    notify.error(e);
-    connectFor.value = null;
-  } finally {
-    connectLoading.value = false;
-  }
-}
-
 function relativeTime(ms: number): string {
   const diff = Math.floor((Date.now() - ms) / 1000);
   if (diff < 60) return `${diff}s ago`;
@@ -173,14 +141,14 @@ onMounted(() => {
   <div class="panel">
     <div class="panel-head">
       <p class="muted">
-        Sonarr/Radarr instances. After saving, click <strong>Show</strong> to reveal the webhook URL
-        plus the Basic-auth username/password to paste into *arr's Settings → Connect → Webhook.
+        Sonarr/Radarr instances. Recodarr polls each enabled instance's library on a schedule and
+        queues tagged items automatically — the only *arr-side setup needed is the API key.
       </p>
       <Button icon="pi pi-plus" label="Add" @click="startCreate" />
     </div>
     <DataTable :value="items" stripedRows size="small">
       <template #empty>
-        <span class="muted">No instances yet — add one to start receiving webhooks.</span>
+        <span class="muted">No instances yet — add one to start polling.</span>
       </template>
       <Column field="kind" header="Kind">
         <template #body="{ data }">
@@ -191,18 +159,6 @@ onMounted(() => {
       <Column field="url" header="URL" />
       <Column field="enabled" header="Enabled">
         <template #body="{ data }">{{ data.enabled ? "yes" : "no" }}</template>
-      </Column>
-      <Column header="Connect" style="width: 8rem">
-        <template #body="{ data }">
-          <Button
-            text
-            size="small"
-            icon="pi pi-link"
-            label="Show"
-            title="Show webhook URL & token"
-            @click="openConnect(data)"
-          />
-        </template>
       </Column>
       <Column header="Status" style="width: 11rem">
         <template #body="{ data }">
@@ -232,41 +188,6 @@ onMounted(() => {
         </template>
       </Column>
     </DataTable>
-
-    <Dialog
-      :visible="connectFor !== null"
-      @update:visible="(v) => (connectFor = v ? connectFor : null)"
-      modal
-      :header="connectFor ? `Connect ${connectFor.kind} → Recodarr` : ''"
-      :style="{ width: '38rem' }"
-    >
-      <div v-if="connectFor" class="connect-body">
-        <p class="muted small">
-          In <strong>{{ connectFor.kind }}</strong
-          >: Settings → Connect → + → Webhook. Paste the URL, set Method to <strong>POST</strong>,
-          tick <strong>On File Import</strong> (and <strong>On File Upgrade</strong>), then fill in
-          the Username and Password fields below.
-        </p>
-
-        <label class="connect-row">
-          <span>URL</span>
-          <code class="copyable">{{ webhookURL(connectFor) }}</code>
-        </label>
-
-        <label class="connect-row">
-          <span>Username</span>
-          <code class="copyable">{{ connectUser || "recodarr" }}</code>
-        </label>
-
-        <label class="connect-row">
-          <span>Password</span>
-          <code class="copyable">{{ connectLoading ? "loading…" : connectPass }}</code>
-        </label>
-      </div>
-      <template #footer>
-        <Button label="Done" @click="connectFor = null" />
-      </template>
-    </Dialog>
 
     <Dialog
       :visible="editing !== null"
@@ -309,24 +230,6 @@ onMounted(() => {
           <span>Enabled</span>
           <ToggleSwitch v-model="editing.enabled" />
         </label>
-        <label>
-          <span>Webhook password</span>
-          <Password
-            v-model="editing.webhookSecret"
-            toggleMask
-            :feedback="false"
-            :placeholder="
-              editing.hasWebhookSecret
-                ? '(stored — leave blank to keep)'
-                : '(auto-generated if empty)'
-            "
-          />
-        </label>
-        <p class="muted small">
-          Used as the HTTP Basic-auth password for incoming webhooks (username is always
-          <code>recodarr</code>). Leave blank to auto-generate. After saving you'll see a panel with
-          everything you need to paste into *arr.
-        </p>
       </div>
       <template #footer>
         <Button text label="Cancel" @click="editing = null" />
@@ -371,29 +274,6 @@ onMounted(() => {
 }
 .form label.row {
   grid-template-columns: 9rem auto;
-}
-.connect-body {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-.connect-row {
-  display: grid;
-  grid-template-columns: 10rem 1fr;
-  align-items: center;
-  gap: 0.75rem;
-}
-.copyable {
-  display: block;
-  background: var(--app-row-alt);
-  border: 1px solid var(--app-panel-border);
-  border-radius: 6px;
-  padding: 0.4rem 0.6rem;
-  font-size: 0.85rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  word-break: break-all;
-  user-select: all;
-  cursor: text;
 }
 .test-ok {
   font-size: 0.85rem;

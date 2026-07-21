@@ -7,8 +7,9 @@ import (
 )
 
 type AppSettings struct {
-	WorkerIntervalSeconds int
-	MaxParallelEncodes    int
+	WorkerIntervalSeconds    int
+	ReconcileIntervalSeconds int
+	MaxParallelEncodes       int
 	EncodingWindowStart   string
 	EncodingWindowEnd     string
 	EncodingPaused        bool
@@ -34,8 +35,9 @@ type AppSettings struct {
 }
 
 const (
-	keyWorkerIntervalSeconds = "worker_interval_seconds"
-	keyMaxParallelEncodes    = "max_parallel_encodes"
+	keyWorkerIntervalSeconds    = "worker_interval_seconds"
+	keyReconcileIntervalSeconds = "reconcile_interval_seconds"
+	keyMaxParallelEncodes       = "max_parallel_encodes"
 	keyEncodingWindowStart   = "encoding_window_start"
 	keyEncodingWindowEnd     = "encoding_window_end"
 	keyEncodingPaused        = "encoding_paused"
@@ -63,8 +65,9 @@ const MaxParallelEncodesCap = 16
 
 func (s *Store) LoadAppSettings(ctx context.Context) (AppSettings, error) {
 	cfg := AppSettings{
-		WorkerIntervalSeconds: 30,
-		MaxParallelEncodes:    1,
+		WorkerIntervalSeconds:    30,
+		ReconcileIntervalSeconds: 300,
+		MaxParallelEncodes:       1,
 		NotifyOnDone:          true,
 		NotifyOnFail:          true,
 		NotifyOnHealth:        true,
@@ -82,6 +85,11 @@ func (s *Store) LoadAppSettings(ctx context.Context) (AppSettings, error) {
 	if v, ok := all[keyWorkerIntervalSeconds]; ok {
 		if n, err := strconv.Atoi(v); err == nil && n >= 5 {
 			cfg.WorkerIntervalSeconds = n
+		}
+	}
+	if v, ok := all[keyReconcileIntervalSeconds]; ok {
+		if n, err := strconv.Atoi(v); err == nil && n >= 60 {
+			cfg.ReconcileIntervalSeconds = n
 		}
 	}
 	if v, ok := all[keyMaxParallelEncodes]; ok {

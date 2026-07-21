@@ -14,6 +14,7 @@ const notify = useNotify();
 const { status: workerStatus, refresh: refreshWorker } = useWorkerStatus();
 
 const intervalSeconds = ref<number>(30);
+const reconcileSeconds = ref<number>(300);
 const maxParallel = ref<number>(1);
 const windowStart = ref<string>("");
 const windowEnd = ref<string>("");
@@ -34,6 +35,7 @@ async function load() {
   const s = await notify.tryRun(() => api.settings.get(), "Couldn't load settings");
   if (s) {
     intervalSeconds.value = parseInt(s.worker_interval_seconds ?? "30") || 30;
+    reconcileSeconds.value = parseInt(s.reconcile_interval_seconds ?? "300") || 300;
     maxParallel.value = parseInt(s.max_parallel_encodes ?? "1") || 1;
     windowStart.value = s.encoding_window_start ?? "";
     windowEnd.value = s.encoding_window_end ?? "";
@@ -75,6 +77,10 @@ async function save() {
     notify.error("Interval must be at least 5 seconds");
     return;
   }
+  if (reconcileSeconds.value < 60) {
+    notify.error("Library poll interval must be at least 60 seconds");
+    return;
+  }
   if (maxParallel.value < 1 || maxParallel.value > 16) {
     notify.error("Parallel encodes must be 1..16");
     return;
@@ -85,6 +91,7 @@ async function save() {
   }
   const updates: AppSettings = {
     worker_interval_seconds: String(intervalSeconds.value),
+    reconcile_interval_seconds: String(reconcileSeconds.value),
     max_parallel_encodes: String(maxParallel.value),
     encoding_window_start: windowStart.value.trim(),
     encoding_window_end: windowEnd.value.trim(),
@@ -127,8 +134,8 @@ onMounted(load);
       </label>
       <p class="muted small">
         Master on/off switch. When turned off, any in-flight encode is cancelled and re-queued (no
-        attempt counted), and no new encodes will start until you turn it back on. Webhooks and the
-        queue keep working normally.
+        attempt counted), and no new encodes will start until you turn it back on. Library polling
+        and the queue keep working normally.
       </p>
     </div>
 
@@ -145,6 +152,18 @@ onMounted(load);
       </label>
       <p class="muted small">
         How often the worker polls qBittorrent and picks up ready jobs. Default: 30.
+      </p>
+
+      <div class="section-title">Library poll interval</div>
+
+      <label>
+        <span>Interval (seconds)</span>
+        <InputNumber v-model="reconcileSeconds" :min="60" :max="86400" showButtons />
+      </label>
+      <p class="muted small">
+        How often Recodarr scans each Sonarr/Radarr library and queues newly imported tagged items.
+        Default: 300 (5 minutes). Lower values pick up new items faster at the cost of more *arr API
+        calls.
       </p>
 
       <div class="section-title">Concurrency</div>
@@ -192,9 +211,9 @@ onMounted(load);
       </label>
       <p class="muted small">
         After every successful encode, Recodarr drops a tiny text file beside the media file with
-        the same name but the extension below. The encoded file itself is not renamed. Future
-        webhooks for any file with a matching marker are skipped so the same file can't accidentally
-        be re-encoded a second time.
+        the same name but the extension below. The encoded file itself is not renamed. On later
+        polls, any file with a matching marker is skipped so the same file can't accidentally be
+        re-encoded a second time.
       </p>
       <label>
         <span>Marker extension</span>

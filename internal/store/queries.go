@@ -2,9 +2,7 @@ package store
 
 import (
 	"context"
-	cryptoRand "crypto/rand"
 	"database/sql"
-	"encoding/hex"
 	"errors"
 	"strings"
 	"time"
@@ -13,13 +11,12 @@ import (
 var ErrNotFound = errors.New("not found")
 
 type ArrInstanceRow struct {
-	ID            int64
-	Kind          string
-	Name          string
-	URL           string
-	APIKey        string
-	Enabled       bool
-	WebhookSecret string
+	ID      int64
+	Kind    string
+	Name    string
+	URL     string
+	APIKey  string
+	Enabled bool
 
 	DeletedAt sql.NullTime
 }
@@ -162,12 +159,12 @@ func (s *Store) GetAllSettings(ctx context.Context) (map[string]string, error) {
 	return out, rows.Err()
 }
 
-const arrInstanceCols = `id,kind,name,url,api_key,enabled,webhook_secret,deleted_at`
+const arrInstanceCols = `id,kind,name,url,api_key,enabled,deleted_at`
 
 func scanArrInstance(scan func(...any) error) (ArrInstanceRow, error) {
 	var r ArrInstanceRow
 	var enabled int
-	if err := scan(&r.ID, &r.Kind, &r.Name, &r.URL, &r.APIKey, &enabled, &r.WebhookSecret, &r.DeletedAt); err != nil {
+	if err := scan(&r.ID, &r.Kind, &r.Name, &r.URL, &r.APIKey, &enabled, &r.DeletedAt); err != nil {
 		return r, err
 	}
 	r.Enabled = enabled != 0
@@ -217,16 +214,9 @@ func (s *Store) GetArrInstance(ctx context.Context, id int64) (*ArrInstanceRow, 
 }
 
 func (s *Store) CreateArrInstance(ctx context.Context, r ArrInstanceRow) (int64, error) {
-	if r.WebhookSecret == "" {
-		tok, err := newWebhookSecret()
-		if err != nil {
-			return 0, err
-		}
-		r.WebhookSecret = tok
-	}
 	res, err := s.DB.ExecContext(ctx,
-		`INSERT INTO arr_instances (kind,name,url,api_key,enabled,webhook_secret) VALUES (?,?,?,?,?,?)`,
-		r.Kind, r.Name, r.URL, r.APIKey, boolToInt(r.Enabled), r.WebhookSecret)
+		`INSERT INTO arr_instances (kind,name,url,api_key,enabled) VALUES (?,?,?,?,?)`,
+		r.Kind, r.Name, r.URL, r.APIKey, boolToInt(r.Enabled))
 	if err != nil {
 		return 0, err
 	}
@@ -234,36 +224,17 @@ func (s *Store) CreateArrInstance(ctx context.Context, r ArrInstanceRow) (int64,
 }
 
 func (s *Store) UpdateArrInstance(ctx context.Context, r ArrInstanceRow) error {
-	var existingKey, existingSecret string
+	var existingKey string
 	_ = s.DB.QueryRowContext(ctx,
-		`SELECT api_key, webhook_secret FROM arr_instances WHERE id=?`, r.ID).
-		Scan(&existingKey, &existingSecret)
+		`SELECT api_key FROM arr_instances WHERE id=?`, r.ID).
+		Scan(&existingKey)
 	if r.APIKey == "" {
 		r.APIKey = existingKey
 	}
-	if r.WebhookSecret == "" {
-		if existingSecret != "" {
-			r.WebhookSecret = existingSecret
-		} else {
-			tok, err := newWebhookSecret()
-			if err != nil {
-				return err
-			}
-			r.WebhookSecret = tok
-		}
-	}
 	_, err := s.DB.ExecContext(ctx,
-		`UPDATE arr_instances SET kind=?,name=?,url=?,api_key=?,enabled=?,webhook_secret=? WHERE id=?`,
-		r.Kind, r.Name, r.URL, r.APIKey, boolToInt(r.Enabled), r.WebhookSecret, r.ID)
+		`UPDATE arr_instances SET kind=?,name=?,url=?,api_key=?,enabled=? WHERE id=?`,
+		r.Kind, r.Name, r.URL, r.APIKey, boolToInt(r.Enabled), r.ID)
 	return err
-}
-
-func newWebhookSecret() (string, error) {
-	b := make([]byte, 24)
-	if _, err := cryptoRand.Read(b); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(b), nil
 }
 
 func (s *Store) DeleteArrInstance(ctx context.Context, id int64) error {
@@ -605,75 +576,12 @@ func (s *Store) HasActiveJob(ctx context.Context, arrKind string, arrInstanceID,
 	return n > 0, err
 }
 
-func (s *Store) ActiveJobItemIDs(ctx context.Context, arrKind string, arrInstanceID int64) (map[int64]bool, error) {
-	rows, err := s.DB.QueryContext(ctx,
-		`SELECT DISTINCT arr_item_id FROM jobs WHERE arr_kind=? AND arr_instance_id=? AND status NOT IN ('done','failed','skipped')`,
-		arrKind, arrInstanceID)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	out := make(map[int64]bool)
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		out[id] = true
-	}
-	return out, rows.Err()
-}
-
-type ParentJobSummary struct {
-	Active int
-	Done   int
-}
-
-func (s *Store) JobSummaryByParent(ctx context.Context, arrKind string, arrInstanceID int64, parentIDs []int64) (map[int64]ParentJobSummary, error) {
-	out := make(map[int64]ParentJobSummary, len(parentIDs))
-	if len(parentIDs) == 0 {
-		return out, nil
-	}
-	const chunk = 500
-	for start := 0; start < len(parentIDs); start += chunk {
-		end := start + chunk
-		if end > len(parentIDs) {
-			end = len(parentIDs)
-		}
-		batch := parentIDs[start:end]
-		args := make([]any, 0, 2+len(batch))
-		args = append(args, arrKind, arrInstanceID)
-		placeholders := strings.Repeat("?,", len(batch))
-		placeholders = placeholders[:len(placeholders)-1]
-		for _, id := range batch {
-			args = append(args, id)
-		}
-		query := `SELECT arr_parent_id,
-			SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done_count,
-			SUM(CASE WHEN status NOT IN ('done','failed','skipped') THEN 1 ELSE 0 END) AS active_count
-		FROM jobs
-		WHERE arr_kind = ? AND arr_instance_id = ? AND arr_parent_id IN (` + placeholders + `)
-		GROUP BY arr_parent_id`
-		rows, err := s.DB.QueryContext(ctx, query, args...)
-		if err != nil {
-			return nil, err
-		}
-		for rows.Next() {
-			var pid int64
-			var done, active int
-			if err := rows.Scan(&pid, &done, &active); err != nil {
-				_ = rows.Close()
-				return nil, err
-			}
-			out[pid] = ParentJobSummary{Active: active, Done: done}
-		}
-		if err := rows.Err(); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		_ = rows.Close()
-	}
-	return out, nil
+func (s *Store) HasJobForItem(ctx context.Context, arrKind string, arrInstanceID, arrItemID int64) (bool, error) {
+	var n int
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT COUNT(1) FROM jobs WHERE arr_kind=? AND arr_instance_id=? AND arr_item_id=?`,
+		arrKind, arrInstanceID, arrItemID).Scan(&n)
+	return n > 0, err
 }
 
 func (s *Store) JobsByStatus(ctx context.Context, status string, limit int) ([]JobRow, error) {
@@ -887,7 +795,7 @@ func (s *Store) InsertJob(ctx context.Context, r JobRow) (int64, error) {
 	}
 	source := r.Source
 	if source == "" {
-		source = "webhook"
+		source = "poll"
 	}
 	res, err := s.DB.ExecContext(ctx,
 		`INSERT INTO jobs (arr_kind,arr_instance_id,arr_item_id,arr_parent_id,title,file_path,file_size,download_id,profile_id,status,tags,source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,

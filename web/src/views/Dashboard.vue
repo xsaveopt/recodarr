@@ -312,8 +312,8 @@ onUnmounted(() => {
       <h3>Welcome to Recodarr.</h3>
       <p class="muted">
         To get started, add a Sonarr or Radarr instance and a tag → profile mapping in
-        <RouterLink to="/settings">Settings</RouterLink>, then paste the webhook URL into *arr's
-        <em>Connect → Webhook</em> page.
+        <RouterLink to="/settings">Settings</RouterLink>. Recodarr then polls each instance and
+        queues any tagged item automatically — no *arr-side setup beyond the API key.
       </p>
     </div>
   </div>
