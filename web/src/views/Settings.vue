@@ -11,6 +11,7 @@ import ArrInstancesPanel from "@/components/ArrInstancesPanel.vue";
 import QbitPanel from "@/components/QbitPanel.vue";
 import ProfilesPanel from "@/components/ProfilesPanel.vue";
 import MappingsPanel from "@/components/MappingsPanel.vue";
+import UnmappedTagsPanel from "@/components/UnmappedTagsPanel.vue";
 import WorkerPanel from "@/components/WorkerPanel.vue";
 import NotificationsPanel from "@/components/NotificationsPanel.vue";
 import LogsPanel from "@/components/LogsPanel.vue";
@@ -23,6 +24,7 @@ const validTabs = [
   "qbit",
   "profiles",
   "mappings",
+  "unmapped",
   "worker",
   "notifications",
   "logs",
@@ -53,6 +55,7 @@ const activeTab = computed<TabValue>({
         <Tab value="qbit">qBittorrent</Tab>
         <Tab value="profiles">HandBrake Profiles</Tab>
         <Tab value="mappings">Mappings</Tab>
+        <Tab value="unmapped">Unmapped Tags</Tab>
         <Tab value="worker">Worker</Tab>
         <Tab value="notifications">Notifications</Tab>
         <Tab value="logs">Logs</Tab>
@@ -63,6 +66,7 @@ const activeTab = computed<TabValue>({
         <TabPanel value="qbit"><QbitPanel /></TabPanel>
         <TabPanel value="profiles"><ProfilesPanel /></TabPanel>
         <TabPanel value="mappings"><MappingsPanel /></TabPanel>
+        <TabPanel value="unmapped"><UnmappedTagsPanel /></TabPanel>
         <TabPanel value="worker"><WorkerPanel /></TabPanel>
         <TabPanel value="notifications"><NotificationsPanel /></TabPanel>
         <TabPanel value="logs"><LogsPanel /></TabPanel>

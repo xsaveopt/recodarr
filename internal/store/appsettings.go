@@ -10,15 +10,15 @@ type AppSettings struct {
 	WorkerIntervalSeconds    int
 	ReconcileIntervalSeconds int
 	MaxParallelEncodes       int
-	EncodingWindowStart   string
-	EncodingWindowEnd     string
-	EncodingPaused        bool
-	OutputSuffixEnabled   bool
-	OutputSuffix          string
-	NotifyURL             string
-	NotifyOnDone          bool
-	NotifyOnFail          bool
-	NotifyOnHealth        bool
+	EncodingWindowStart      string
+	EncodingWindowEnd        string
+	EncodingPaused           bool
+	OutputSuffixEnabled      bool
+	OutputSuffix             string
+	NotifyURL                string
+	NotifyOnDone             bool
+	NotifyOnFail             bool
+	NotifyOnHealth           bool
 
 	LogAppLevel string
 
@@ -38,15 +38,15 @@ const (
 	keyWorkerIntervalSeconds    = "worker_interval_seconds"
 	keyReconcileIntervalSeconds = "reconcile_interval_seconds"
 	keyMaxParallelEncodes       = "max_parallel_encodes"
-	keyEncodingWindowStart   = "encoding_window_start"
-	keyEncodingWindowEnd     = "encoding_window_end"
-	keyEncodingPaused        = "encoding_paused"
-	keyOutputSuffixEnabled   = "output_suffix_enabled"
-	keyOutputSuffix          = "output_suffix"
-	keyNotifyURL             = "notify_url"
-	keyNotifyOnDone          = "notify_on_done"
-	keyNotifyOnFail          = "notify_on_fail"
-	keyNotifyOnHealth        = "notify_on_health"
+	keyEncodingWindowStart      = "encoding_window_start"
+	keyEncodingWindowEnd        = "encoding_window_end"
+	keyEncodingPaused           = "encoding_paused"
+	keyOutputSuffixEnabled      = "output_suffix_enabled"
+	keyOutputSuffix             = "output_suffix"
+	keyNotifyURL                = "notify_url"
+	keyNotifyOnDone             = "notify_on_done"
+	keyNotifyOnFail             = "notify_on_fail"
+	keyNotifyOnHealth           = "notify_on_health"
 
 	keyLogAppLevel      = "log_app_level"
 	keyLogRotateEnabled = "log_rotate_enabled"
@@ -68,15 +68,15 @@ func (s *Store) LoadAppSettings(ctx context.Context) (AppSettings, error) {
 		WorkerIntervalSeconds:    30,
 		ReconcileIntervalSeconds: 300,
 		MaxParallelEncodes:       1,
-		NotifyOnDone:          true,
-		NotifyOnFail:          true,
-		NotifyOnHealth:        true,
-		LogAppLevel:           "INFO",
-		LogRotateEnabled:      true,
-		LogMaxSizeMB:          50,
-		LogMaxAgeDays:         30,
-		LogMaxBackups:         5,
-		AgentFallbackLocal:    true,
+		NotifyOnDone:             true,
+		NotifyOnFail:             true,
+		NotifyOnHealth:           true,
+		LogAppLevel:              "INFO",
+		LogRotateEnabled:         true,
+		LogMaxSizeMB:             50,
+		LogMaxAgeDays:            30,
+		LogMaxBackups:            5,
+		AgentFallbackLocal:       true,
 	}
 	all, err := s.GetAllSettings(ctx)
 	if err != nil {
