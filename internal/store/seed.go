@@ -85,7 +85,7 @@ func defaultProfiles() []ProfileRow {
 			AudioBitrate:    96,
 			AudioMixdown:    "stereo",
 			SubtitleCopy:    true,
-			ExtraArgs:       "--encopts la-depth=40:b-pyramid=1",
+			ExtraArgs:       "--encopts la-depth=40:b-pyramid=1:extbrc=1:mbbrc=1:adaptive-i=1:adaptive-b=1",
 		},
 		{
 			Name:            "Live action — qsv (HEVC)",
@@ -98,7 +98,7 @@ func defaultProfiles() []ProfileRow {
 			AudioBitrate:    128,
 			AudioMixdown:    "stereo",
 			SubtitleCopy:    true,
-			ExtraArgs:       "--encopts la-depth=40:b-pyramid=1",
+			ExtraArgs:       "--encopts la-depth=40:b-pyramid=1:extbrc=1:mbbrc=1:adaptive-i=1:adaptive-b=1",
 		},
 
 		{
@@ -111,7 +111,7 @@ func defaultProfiles() []ProfileRow {
 			AudioBitrate:    96,
 			AudioMixdown:    "stereo",
 			SubtitleCopy:    true,
-			ExtraArgs:       "--encopts la-depth=40",
+			ExtraArgs:       "--encopts la-depth=40:extbrc=1:adaptive-i=1:adaptive-b=1",
 		},
 		{
 			Name:            "Live action — qsv (AV1)",
@@ -123,7 +123,7 @@ func defaultProfiles() []ProfileRow {
 			AudioBitrate:    128,
 			AudioMixdown:    "stereo",
 			SubtitleCopy:    true,
-			ExtraArgs:       "--encopts la-depth=40",
+			ExtraArgs:       "--encopts la-depth=40:extbrc=1:adaptive-i=1:adaptive-b=1",
 		},
 
 		{
