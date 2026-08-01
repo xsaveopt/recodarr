@@ -183,8 +183,8 @@ const profileNameById = computed(() => {
   return m;
 });
 
-async function load() {
-  loading.value = true;
+async function load(background = false) {
+  if (!background) loading.value = true;
   try {
     const res = await notify.tryRun(
       () =>
@@ -204,9 +204,13 @@ async function load() {
     }
     syncURL();
   } finally {
-    loading.value = false;
+    if (!background) loading.value = false;
   }
 }
+
+const pollPaused = computed(
+  () => selectedJobs.value.length > 0 || clearDialogOpen.value || logJob.value !== null,
+);
 
 function onPage(ev: DataTablePageEvent) {
   pageOffset.value = ev.first;
@@ -465,7 +469,9 @@ function shortTime(s?: string) {
 onMounted(() => {
   void loadProfiles();
   void load();
-  timer = window.setInterval(load, 5000);
+  timer = window.setInterval(() => {
+    if (!pollPaused.value) void load(true);
+  }, 15000);
 });
 onUnmounted(() => {
   if (timer != null) window.clearInterval(timer);
@@ -492,7 +498,7 @@ onUnmounted(() => {
           title="Pick which statuses to clear from this list. Files on disk are not touched."
           @click="openClearDialog"
         />
-        <Button text icon="pi pi-refresh" label="Refresh" @click="load" />
+        <Button text icon="pi pi-refresh" label="Refresh" @click="load()" />
       </div>
     </div>
     <div class="filters">
