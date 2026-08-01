@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/xsaveopt/recodarr/internal/arr"
+	"github.com/xsaveopt/recodarr/internal/handbrake"
 	"github.com/xsaveopt/recodarr/internal/store"
 )
 
@@ -113,6 +114,11 @@ func (w *Worker) reconcileParent(ctx context.Context, cfg store.AppSettings, ins
 	for _, f := range files {
 		clean, err := sanitizeMediaPath(f.Path)
 		if err != nil {
+			continue
+		}
+		if handbrake.IsTempPath(clean) {
+			slog.Debug("reconcile: skipping in-flight encode temp file",
+				"kind", inst.Kind, "instance", inst.ID, "path", clean)
 			continue
 		}
 		if cfg.OutputSuffixEnabled && sidecarExists(clean, cfg.OutputSuffix) {

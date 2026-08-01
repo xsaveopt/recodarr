@@ -507,6 +507,12 @@ func (w *Worker) runEncodes(ctx context.Context) {
 			}
 			continue
 		}
+		if handbrake.IsTempPath(j.FilePath) {
+			_ = w.store.MarkJobFailed(ctx, j.ID,
+				"path is a recodarr temp file — the *arr indexed an in-flight encode; delete this job and rescan the series", "")
+			slog.Warn("refusing to encode a recodarr temp file", "id", j.ID, "path", j.FilePath)
+			continue
+		}
 		w.startEncode(ctx, j)
 	}
 }

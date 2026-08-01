@@ -385,13 +385,7 @@ func readErr(r io.Reader) string {
 }
 
 func localTempPath(input string, s handbrake.Settings) string {
-	dir := filepath.Dir(input)
-	base := filepath.Base(input)
-	ext := filepath.Ext(base)
-	if s.ContainerFormat == "mp4" {
-		ext = ".mp4"
-	}
-	return filepath.Join(dir, "."+base+".recodarr.tmp"+ext)
+	return handbrake.TempPath(input, s.ContainerFormat)
 }
 
 func containerFor(sourcePath string, s handbrake.Settings) string {

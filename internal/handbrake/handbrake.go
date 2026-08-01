@@ -82,6 +82,26 @@ type Settings struct {
 	NoCommit              bool
 }
 
+const tempMarker = ".recodarr.tmp"
+
+func TempPrefix(base string) string {
+	return "." + base + tempMarker
+}
+
+func TempPath(input, containerFormat string) string {
+	base := filepath.Base(input)
+	ext := filepath.Ext(base)
+	if containerFormat == "mp4" {
+		ext = ".mp4"
+	}
+	return filepath.Join(filepath.Dir(input), TempPrefix(base)+ext)
+}
+
+func IsTempPath(p string) bool {
+	base := filepath.Base(p)
+	return strings.HasPrefix(base, ".") && strings.Contains(base, tempMarker)
+}
+
 type Progress struct {
 	Percent float64
 	FPS     float64
@@ -131,13 +151,7 @@ func Run(ctx context.Context, input string, s Settings, sink *LineSink, onProgre
 	if _, err := os.Stat(input); err != nil {
 		return RunResult{}, fmt.Errorf("stat input: %w", err)
 	}
-	dir := filepath.Dir(input)
-	base := filepath.Base(input)
-	outExt := filepath.Ext(base)
-	if s.ContainerFormat == "mp4" {
-		outExt = ".mp4"
-	}
-	tmp := filepath.Join(dir, "."+base+".recodarr.tmp"+outExt)
+	tmp := TempPath(input, s.ContainerFormat)
 
 	var buf bytes.Buffer
 	var bufMu sync.Mutex

@@ -167,7 +167,7 @@ func recoverOrphanEncodes(ctx context.Context, st *store.Store) {
 		if err != nil {
 			continue
 		}
-		needle := "." + base + ".recodarr.tmp"
+		needle := handbrake.TempPrefix(base)
 		for _, e := range entries {
 			if strings.HasPrefix(e.Name(), needle) {
 				full := filepath.Join(dir, e.Name())
