@@ -9,7 +9,7 @@ require (
 	github.com/prometheus/client_golang v1.24.1
 	golang.org/x/crypto v0.54.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
-	modernc.org/sqlite v1.54.0
+	modernc.org/sqlite v1.55.0
 )
 
 require (
