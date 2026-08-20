@@ -273,3 +273,61 @@ export interface AppSettings {
   hasAgentToken?: string;
   [key: string]: string | undefined;
 }
+
+export interface LibraryItem {
+  instanceId: number;
+  instanceName: string;
+  itemId: number;
+  title: string;
+  year: number;
+  path: string;
+  fileCount: number;
+  totalSize: number;
+  runtimeSeconds: number;
+  bitrateBps: number;
+  bitrateExact: boolean;
+  videoCodec: string;
+  resolution: string;
+  tagLabels: string[];
+  mapped: boolean;
+  mappedTags: string[];
+}
+
+export interface LibraryMappableTag {
+  tagId: number;
+  tagLabel: string;
+  profileId: number;
+  profileName: string;
+}
+
+export interface LibraryInstance {
+  id: number;
+  name: string;
+  error?: string;
+  tagCount: number;
+  mappableTags: LibraryMappableTag[];
+}
+
+export interface LibraryScan {
+  kind: "sonarr" | "radarr";
+  deep: boolean;
+  scannedAt: string;
+  instances: LibraryInstance[];
+  items: LibraryItem[];
+}
+
+export interface LibraryFile {
+  fileId: number;
+  path: string;
+  relativePath: string;
+  size: number;
+  runtimeSeconds: number;
+  bitrateBps: number;
+  bitrateExact: boolean;
+  videoBitrate: number;
+  audioBitrate: number;
+  videoCodec: string;
+  audioCodec: string;
+  resolution: string;
+  quality: string;
+}

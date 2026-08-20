@@ -247,6 +247,8 @@ func registerAdminRoutes(r chi.Router, st *store.Store, w workerClient, hc *heal
 		r.Delete("/{id}", deleteProfile(st))
 	})
 
+	registerLibraryRoutes(r, st)
+
 	r.Get("/worker/status", workerStatus(w, st))
 	r.Post("/worker/pause", workerSetPaused(w))
 

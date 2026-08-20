@@ -6,6 +6,8 @@ import type {
   HealthSnapshot,
   InstanceTag,
   Job,
+  LibraryFile,
+  LibraryScan,
   JobDebug,
   JobListParams,
   JobsPage,
@@ -70,6 +72,23 @@ export const api = {
     unmappedTags: () => request<UnmappedTag[]>("GET", "/arr-instances/unmapped-tags"),
     test: (id: number) =>
       request<{ ok: boolean; error?: string }>("POST", `/arr-instances/${id}/test`),
+  },
+  library: {
+    scan: (kind: "sonarr" | "radarr", opts: { deep?: boolean; refresh?: boolean } = {}) => {
+      const q = new URLSearchParams();
+      if (opts.deep) q.set("deep", "true");
+      if (opts.refresh) q.set("refresh", "true");
+      const qs = q.toString();
+      return request<LibraryScan>("GET", `/library/${kind}${qs ? `?${qs}` : ""}`);
+    },
+    files: (kind: "sonarr" | "radarr", instanceId: number, itemId: number) =>
+      request<LibraryFile[]>("GET", `/library/${kind}/${instanceId}/${itemId}/files`),
+    addTag: (kind: "sonarr" | "radarr", instanceId: number, itemId: number, tagId: number) =>
+      request<{ tagId: number; tagLabel: string; profileId: number }>(
+        "POST",
+        `/library/${kind}/${instanceId}/${itemId}/tags`,
+        { tagId },
+      ),
   },
   tagMappings: {
     list: () => request<TagMapping[]>("GET", "/tag-mappings"),

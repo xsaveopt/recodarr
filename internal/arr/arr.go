@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -52,20 +53,29 @@ func (c *Client) Tags(ctx context.Context) ([]Tag, error) {
 }
 
 type LibraryItem struct {
-	ID        int64
-	Title     string
-	Path      string
-	TagIDs    []int64
-	FileCount int
-	TotalSize int64
+	ID             int64
+	Title          string
+	Path           string
+	TagIDs         []int64
+	FileCount      int
+	TotalSize      int64
+	RuntimeMinutes int
+	Year           int
 }
 
 type LibraryFile struct {
-	ID           int64
-	ParentID     int64
-	Path         string
-	RelativePath string
-	Size         int64
+	ID             int64
+	ParentID       int64
+	Path           string
+	RelativePath   string
+	Size           int64
+	RuntimeSeconds int
+	VideoBitrate   int64
+	AudioBitrate   int64
+	VideoCodec     string
+	AudioCodec     string
+	Resolution     string
+	Quality        string
 }
 
 type sonarrSeries struct {
@@ -73,18 +83,37 @@ type sonarrSeries struct {
 	Title      string  `json:"title"`
 	Path       string  `json:"path"`
 	Tags       []int64 `json:"tags"`
+	Runtime    int     `json:"runtime"`
+	Year       int     `json:"year"`
 	Statistics struct {
 		EpisodeFileCount int   `json:"episodeFileCount"`
 		SizeOnDisk       int64 `json:"sizeOnDisk"`
 	} `json:"statistics"`
 }
 
+type mediaInfo struct {
+	AudioBitrate int64  `json:"audioBitrate"`
+	AudioCodec   string `json:"audioCodec"`
+	VideoBitrate int64  `json:"videoBitrate"`
+	VideoCodec   string `json:"videoCodec"`
+	Resolution   string `json:"resolution"`
+	RunTime      string `json:"runTime"`
+}
+
+type fileQuality struct {
+	Quality struct {
+		Name string `json:"name"`
+	} `json:"quality"`
+}
+
 type sonarrEpisodeFile struct {
-	ID           int64  `json:"id"`
-	SeriesID     int64  `json:"seriesId"`
-	Path         string `json:"path"`
-	RelativePath string `json:"relativePath"`
-	Size         int64  `json:"size"`
+	ID           int64       `json:"id"`
+	SeriesID     int64       `json:"seriesId"`
+	Path         string      `json:"path"`
+	RelativePath string      `json:"relativePath"`
+	Size         int64       `json:"size"`
+	MediaInfo    *mediaInfo  `json:"mediaInfo,omitempty"`
+	Quality      fileQuality `json:"quality"`
 }
 
 type radarrMovie struct {
@@ -93,13 +122,49 @@ type radarrMovie struct {
 	Path       string  `json:"path"`
 	Tags       []int64 `json:"tags"`
 	HasFile    bool    `json:"hasFile"`
+	Runtime    int     `json:"runtime"`
+	Year       int     `json:"year"`
 	SizeOnDisk int64   `json:"sizeOnDisk"`
 	MovieFile  *struct {
-		ID           int64  `json:"id"`
-		Path         string `json:"path"`
-		RelativePath string `json:"relativePath"`
-		Size         int64  `json:"size"`
+		ID           int64       `json:"id"`
+		Path         string      `json:"path"`
+		RelativePath string      `json:"relativePath"`
+		Size         int64       `json:"size"`
+		MediaInfo    *mediaInfo  `json:"mediaInfo,omitempty"`
+		Quality      fileQuality `json:"quality"`
 	} `json:"movieFile,omitempty"`
+}
+
+func parseRunTime(s string) int {
+	if s == "" {
+		return 0
+	}
+	parts := strings.Split(s, ":")
+	total := 0
+	for _, p := range parts {
+		if i := strings.IndexByte(p, '.'); i >= 0 {
+			p = p[:i]
+		}
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return 0
+		}
+		total = total*60 + n
+	}
+	return total
+}
+
+func applyMediaInfo(f *LibraryFile, mi *mediaInfo, q fileQuality) {
+	f.Quality = q.Quality.Name
+	if mi == nil {
+		return
+	}
+	f.RuntimeSeconds = parseRunTime(mi.RunTime)
+	f.VideoBitrate = mi.VideoBitrate
+	f.AudioBitrate = mi.AudioBitrate
+	f.VideoCodec = mi.VideoCodec
+	f.AudioCodec = mi.AudioCodec
+	f.Resolution = mi.Resolution
 }
 
 func (c *Client) Library(ctx context.Context) ([]LibraryItem, error) {
@@ -115,12 +180,14 @@ func (c *Client) Library(ctx context.Context) ([]LibraryItem, error) {
 				continue
 			}
 			out = append(out, LibraryItem{
-				ID:        s.ID,
-				Title:     s.Title,
-				Path:      s.Path,
-				TagIDs:    s.Tags,
-				FileCount: s.Statistics.EpisodeFileCount,
-				TotalSize: s.Statistics.SizeOnDisk,
+				ID:             s.ID,
+				Title:          s.Title,
+				Path:           s.Path,
+				TagIDs:         s.Tags,
+				FileCount:      s.Statistics.EpisodeFileCount,
+				TotalSize:      s.Statistics.SizeOnDisk,
+				RuntimeMinutes: s.Runtime,
+				Year:           s.Year,
 			})
 		}
 		return out, nil
@@ -139,12 +206,14 @@ func (c *Client) Library(ctx context.Context) ([]LibraryItem, error) {
 				size = m.MovieFile.Size
 			}
 			out = append(out, LibraryItem{
-				ID:        m.ID,
-				Title:     m.Title,
-				Path:      m.Path,
-				TagIDs:    m.Tags,
-				FileCount: 1,
-				TotalSize: size,
+				ID:             m.ID,
+				Title:          m.Title,
+				Path:           m.Path,
+				TagIDs:         m.Tags,
+				FileCount:      1,
+				TotalSize:      size,
+				RuntimeMinutes: m.Runtime,
+				Year:           m.Year,
 			})
 		}
 		return out, nil
@@ -166,13 +235,15 @@ func (c *Client) Files(ctx context.Context, parentID int64) ([]LibraryFile, erro
 			if ef.Path == "" {
 				continue
 			}
-			out = append(out, LibraryFile{
+			lf := LibraryFile{
 				ID:           ef.ID,
 				ParentID:     ef.SeriesID,
 				Path:         ef.Path,
 				RelativePath: ef.RelativePath,
 				Size:         ef.Size,
-			})
+			}
+			applyMediaInfo(&lf, ef.MediaInfo, ef.Quality)
+			out = append(out, lf)
 		}
 		return out, nil
 	case KindRadarr:
@@ -184,13 +255,15 @@ func (c *Client) Files(ctx context.Context, parentID int64) ([]LibraryFile, erro
 		if !m.HasFile || m.MovieFile == nil || m.MovieFile.Path == "" {
 			return nil, nil
 		}
-		return []LibraryFile{{
+		lf := LibraryFile{
 			ID:           m.MovieFile.ID,
 			ParentID:     m.ID,
 			Path:         m.MovieFile.Path,
 			RelativePath: m.MovieFile.RelativePath,
 			Size:         m.MovieFile.Size,
-		}}, nil
+		}
+		applyMediaInfo(&lf, m.MovieFile.MediaInfo, m.MovieFile.Quality)
+		return []LibraryFile{lf}, nil
 	default:
 		return nil, fmt.Errorf("unknown arr kind %q", c.kind)
 	}
@@ -251,6 +324,40 @@ func MatchImportDownloadID(events []ImportEvent, kind Kind, absPath, relativePat
 		return events[0].DownloadID
 	}
 	return ""
+}
+
+func (c *Client) AddTag(ctx context.Context, itemID, tagID int64) error {
+	var path string
+	var body any
+	switch c.kind {
+	case KindSonarr:
+		path = "/api/v3/series/editor"
+		body = map[string]any{"seriesIds": []int64{itemID}, "tags": []int64{tagID}, "applyTags": "add"}
+	case KindRadarr:
+		path = "/api/v3/movie/editor"
+		body = map[string]any{"movieIds": []int64{itemID}, "tags": []int64{tagID}, "applyTags": "add"}
+	default:
+		return fmt.Errorf("unknown arr kind %q", c.kind)
+	}
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.baseURL+path, bytes.NewReader(buf))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-Api-Key", c.apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("%s add tag: status=%d", c.kind, resp.StatusCode)
+	}
+	return nil
 }
 
 func (c *Client) Ping(ctx context.Context) error {
