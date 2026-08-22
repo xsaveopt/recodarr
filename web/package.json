@@ -14,20 +14,20 @@
   },
   "dependencies": {
     "@primeuix/themes": "^2.0.3",
-    "pinia": "^4.0.2",
+    "pinia": "^4.0.3",
     "primeicons": "^7.0.0",
     "primevue": "^4.5.5",
     "vue": "^3.5.41",
     "vue-router": "^5.2.0"
   },
   "devDependencies": {
-    "@types/node": "^26.1.2",
+    "@types/node": "^26.2.0",
     "@vitejs/plugin-vue": "^6.0.8",
-    "oxfmt": "^0.62.0",
-    "oxlint": "^1.77.0",
+    "oxfmt": "^0.64.0",
+    "oxlint": "^1.79.0",
     "typescript": "~6.0.3",
     "vite": "^8.2.1",
-    "vue-tsc": "^3.3.9"
+    "vue-tsc": "^3.3.10"
   },
   "packageManager": "pnpm@11.17.0"
 }
