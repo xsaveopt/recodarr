@@ -222,11 +222,10 @@ func TestProtectedRoutesRejectAnonymousCallers(t *testing.T) {
 
 func TestHealthEndpointIsOpen(t *testing.T) {
 	env := newTestEnv(t)
-	w := env.do(t, http.MethodGet, "/api/health", nil)
+	w := env.do(t, http.MethodGet, "/health", nil)
 	wantStatus(t, w, http.StatusOK)
-	got := decodeJSON[map[string]string](t, w)
-	if got["status"] != "ok" {
-		t.Fatalf("got %v, want status ok", got)
+	if got := w.Body.String(); got != "up" {
+		t.Fatalf("got %q, want up", got)
 	}
 }
 

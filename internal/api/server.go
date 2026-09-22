@@ -39,10 +39,6 @@ func NewRouter(st *store.Store, worker *job.Worker, hc *health.Checker, lls LogL
 			registerAuthRoutes(r, a)
 		})
 
-		r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-		})
-
 		r.Group(func(r chi.Router) {
 			r.Use(a.Middleware)
 
@@ -57,7 +53,22 @@ func NewRouter(st *store.Store, worker *job.Worker, hc *health.Checker, lls LogL
 
 	r.Method("GET", "/metrics", metrics.Handler(st, worker, os.Getenv("RECODARR_METRICS_TOKEN")))
 
+	r.Get("/health", healthHandler(st))
+
 	r.Handle("/*", spaHandler(assets))
 
 	return r
+}
+
+func healthHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		if err := st.DB.PingContext(r.Context()); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("degraded"))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("up"))
+	}
 }

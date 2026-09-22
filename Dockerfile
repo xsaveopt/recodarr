@@ -89,4 +89,6 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 EXPOSE 8080
 VOLUME ["/data"]
 USER recodarr
+HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
+    CMD ["/usr/local/bin/recodarr", "healthcheck"]
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

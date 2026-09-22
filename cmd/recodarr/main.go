@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -38,6 +39,9 @@ func run() error {
 		switch os.Args[1] {
 		case "reset-admin":
 			runResetAdmin(envOr("RECODARR_DATA_DIR", "/data"))
+			return nil
+		case "healthcheck":
+			runHealthcheck()
 			return nil
 		case "-h", "--help", "help":
 			printHelp()
@@ -194,12 +198,40 @@ func runResetAdmin(dataDir string) {
 	slog.Info("admin user removed; visit the app to set up a new one")
 }
 
+func runHealthcheck() {
+	switch strings.ToLower(envOr("RECODARR_MODE", "server")) {
+	case "agent":
+		probeHealth(envOr("RECODARR_AGENT_ADDR", ":8090"), agentpkg.PathPrefix+"/healthz")
+	default:
+		probeHealth(envOr("RECODARR_ADDR", ":8080"), "/health")
+	}
+}
+
+func probeHealth(addr, path string) {
+	port := addr
+	if _, p, err := net.SplitHostPort(addr); err == nil {
+		port = p
+	}
+	url := fmt.Sprintf("http://127.0.0.1:%s%s", port, path)
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		os.Exit(1)
+	}
+	status := resp.StatusCode
+	_ = resp.Body.Close()
+	if status != http.StatusOK {
+		os.Exit(1)
+	}
+}
+
 func printHelp() {
 	const usage = `recodarr — *arr-companion re-encoder
 
 Usage:
   recodarr               start the server
   recodarr reset-admin   wipe the admin user; first visit shows setup screen again
+  recodarr healthcheck   probe the running server's health endpoint and exit 0 or 1
   recodarr help          show this message
 
 Env:

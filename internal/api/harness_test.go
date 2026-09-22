@@ -106,14 +106,12 @@ func newTestEnv(t *testing.T) *testEnv {
 		r.Route("/auth", func(r chi.Router) {
 			registerAuthRoutes(r, a)
 		})
-		r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-		})
 		r.Group(func(r chi.Router) {
 			r.Use(a.Middleware)
 			registerAdminRoutes(r, st, env.worker, health.New(st), env.logs)
 		})
 	})
+	r.Get("/health", healthHandler(st))
 	r.Handle("/*", spaHandler(testAssets()))
 	env.router = r
 	return env
