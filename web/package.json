@@ -14,7 +14,7 @@
     "format:check": "oxfmt --check ."
   },
   "dependencies": {
-    "@primeuix/themes": "^2.0.3",
+    "@primeuix/themes": "^3.0.1",
     "pinia": "^4.0.3",
     "primeicons": "^8.0.1",
     "primevue": "^5.0.1",
