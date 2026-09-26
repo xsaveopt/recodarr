@@ -171,7 +171,7 @@ func (h *appHandler) Handle(_ context.Context, r slog.Record) error {
 	b.WriteString(r.Message)
 
 	for _, a := range h.attrs {
-		appendAttr(&b, a, h.group)
+		appendAttr(&b, a, "")
 	}
 	r.Attrs(func(a slog.Attr) bool {
 		appendAttr(&b, a, h.group)
@@ -184,7 +184,13 @@ func (h *appHandler) Handle(_ context.Context, r slog.Record) error {
 
 func (h *appHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	clone := *h
-	clone.attrs = append(append([]slog.Attr{}, h.attrs...), attrs...)
+	clone.attrs = append([]slog.Attr{}, h.attrs...)
+	for _, a := range attrs {
+		if h.group != "" && !a.Equal(slog.Attr{}) {
+			a.Key = h.group + "." + a.Key
+		}
+		clone.attrs = append(clone.attrs, a)
+	}
 	return &clone
 }
 
@@ -223,7 +229,7 @@ func appendAttr(b *strings.Builder, a slog.Attr, group string) {
 	b.WriteString(a.Key)
 	b.WriteByte('=')
 	v := a.Value.String()
-	if strings.ContainsAny(v, " \t\"") {
+	if strings.ContainsAny(v, " \t\"\n\r") {
 		fmt.Fprintf(b, "%q", v)
 	} else {
 		b.WriteString(v)
