@@ -17,6 +17,12 @@ updates:
     ignore:
       - dependency-name: typescript
         versions: [">=7"]
+      - dependency-name: primevue
+        versions: [">=5"]
+      - dependency-name: "@primeuix/themes"
+        versions: [">=3"]
+      - dependency-name: primeicons
+        versions: [">=8"]
     groups:
       npm-minor-and-patch:
         update-types: ["minor", "patch"]
