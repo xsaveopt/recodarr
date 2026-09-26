@@ -307,6 +307,23 @@ func TestAgentTestWithExplicitCredentials(t *testing.T) {
 	}
 }
 
+func TestAgentTestVerifiesToken(t *testing.T) {
+	env := newTestEnv(t).login(t)
+	srv := startAgent(t, "right")
+
+	w := env.do(t, http.MethodPost, "/api/agent/test", map[string]string{"url": srv.URL, "token": "right"})
+	wantStatus(t, w, http.StatusOK)
+	if got := decodeJSON[map[string]any](t, w); got["ok"] != true {
+		t.Fatalf("got %v, want the good token accepted", got)
+	}
+
+	w = env.do(t, http.MethodPost, "/api/agent/test", map[string]string{"url": srv.URL, "token": "wrong"})
+	wantStatus(t, w, http.StatusOK)
+	if got := decodeJSON[map[string]any](t, w); got["ok"] != false || !strings.Contains(fmt.Sprint(got["error"]), "token") {
+		t.Fatalf("got %v, want the wrong token rejected", got)
+	}
+}
+
 func TestAgentTestFallsBackToStoredSettings(t *testing.T) {
 	env := newTestEnv(t).login(t)
 	ctx := context.Background()

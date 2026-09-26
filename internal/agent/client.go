@@ -55,6 +55,26 @@ func (c *Client) Ping(ctx context.Context) (*HealthSnapshot, error) {
 	return &hs, nil
 }
 
+func (c *Client) CheckAuth(ctx context.Context) error {
+	req, err := c.newRequest(ctx, http.MethodGet, "/jobs", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return nil
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return errors.New("agent rejected the token")
+	default:
+		return fmt.Errorf("agent /jobs returned %d", resp.StatusCode)
+	}
+}
+
 func (c *Client) Encode(
 	ctx context.Context,
 	sourcePath string,

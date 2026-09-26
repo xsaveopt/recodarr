@@ -1586,8 +1586,13 @@ func testAgent(st *store.Store) http.HandlerFunc {
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
 		defer cancel()
-		hs, err := agent.NewClient(url, token).Ping(ctx)
+		client := agent.NewClient(url, token)
+		hs, err := client.Ping(ctx)
 		if err != nil {
+			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		if err := client.CheckAuth(ctx); err != nil {
 			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}

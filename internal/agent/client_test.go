@@ -172,6 +172,16 @@ func TestClientPing(t *testing.T) {
 	}
 }
 
+func TestClientCheckAuth(t *testing.T) {
+	env := newAgentEnv(t, false)
+	if err := NewClient(env.srv.URL, testToken).CheckAuth(context.Background()); err != nil {
+		t.Fatalf("good token: %v", err)
+	}
+	if err := NewClient(env.srv.URL, "wrong").CheckAuth(context.Background()); err == nil {
+		t.Fatal("a wrong token was accepted")
+	}
+}
+
 func TestClientDelete(t *testing.T) {
 	env := newAgentEnv(t, false)
 	js, _ := env.store.Create(sampleRequest(), false)
