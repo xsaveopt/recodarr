@@ -337,9 +337,20 @@ function applyRangeSelection(targetId: number, select: boolean) {
   selectedJobs.value = select ? [...others, ...range] : others;
 }
 
-function onRowSelect(ev: { data: Job; originalEvent: Event }) {
+let shiftHeld = false;
+
+function onTableClickCapture(ev: MouseEvent) {
+  shiftHeld = ev.shiftKey;
+}
+
+function isShiftSelect(ev: { originalEvent: Event }): boolean {
   const oe = ev.originalEvent as MouseEvent | KeyboardEvent | undefined;
-  if (oe && "shiftKey" in oe && oe.shiftKey) {
+  if (oe && "shiftKey" in oe) return oe.shiftKey;
+  return shiftHeld;
+}
+
+function onRowSelect(ev: { data: Job; originalEvent: Event }) {
+  if (isShiftSelect(ev)) {
     applyRangeSelection(ev.data.id, true);
   } else {
     rangeAnchorId.value = ev.data.id;
@@ -347,8 +358,7 @@ function onRowSelect(ev: { data: Job; originalEvent: Event }) {
 }
 
 function onRowUnselect(ev: { data: Job; originalEvent: Event }) {
-  const oe = ev.originalEvent as MouseEvent | KeyboardEvent | undefined;
-  if (oe && "shiftKey" in oe && oe.shiftKey) {
+  if (isShiftSelect(ev)) {
     applyRangeSelection(ev.data.id, false);
   } else {
     rangeAnchorId.value = ev.data.id;
@@ -595,6 +605,7 @@ onUnmounted(() => {
       dataKey="id"
       @row-select="onRowSelect"
       @row-unselect="onRowUnselect"
+      @click.capture="onTableClickCapture"
       :rows="pageSize"
       :first="pageOffset"
       :totalRecords="totalRecords"

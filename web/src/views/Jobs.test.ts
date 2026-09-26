@@ -353,6 +353,22 @@ describe("bulk selection", () => {
     expect(view.root.querySelector(".bulk-bar")).toBeNull();
   });
 
+  it("shift-clicking a checkbox selects the whole range from the anchor", async () => {
+    await show(mixed());
+    await click(rowCheckbox(1));
+    rowCheckbox(4)?.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true, shiftKey: true }),
+    );
+    await flush();
+    expect(view.root.querySelector(".bulk-bar")?.textContent).toContain("4 selected");
+
+    rowCheckbox(2)?.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true, shiftKey: true }),
+    );
+    await flush();
+    expect(view.root.querySelector(".bulk-bar")?.textContent).toContain("2 selected");
+  });
+
   it("deletes the selected ids after confirmation", async () => {
     api.bulkDelete.mockResolvedValue({ deleted: 1 });
     await show(mixed());
