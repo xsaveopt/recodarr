@@ -299,7 +299,8 @@ onUnmounted(() => {
             <span class="row-marker" :class="`marker-${j.status}`"></span>
             <span class="row-title" :title="j.title">{{ j.title }}</span>
             <span v-if="j.finalSize != null && j.originalSize != null" class="row-saved tnum muted">
-              −{{ Math.round((1 - j.finalSize / j.originalSize) * 100) }}%
+              {{ j.finalSize > j.originalSize ? "+" : "−"
+              }}{{ Math.round(Math.abs(1 - j.finalSize / j.originalSize) * 100) }}%
             </span>
             <span v-else class="row-saved muted">{{ statusLabel(j.status) }}</span>
             <span class="row-time tnum muted">{{ relativeTime(j.updatedAt) }}</span>

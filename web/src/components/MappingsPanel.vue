@@ -76,7 +76,7 @@ async function add() {
     validationError.value = "Select a target (Sonarr / Radarr / Both).";
     return;
   }
-  if (!newTag.value) {
+  if (!newTag.value || (newKind.value !== "both" && newTag.value.kind !== newKind.value)) {
     validationError.value = "Select a tag.";
     return;
   }

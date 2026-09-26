@@ -46,7 +46,7 @@ async function save() {
     notify.error("URL is required when the agent is enabled");
     return;
   }
-  if (enabled.value && !token.value && !tokenStored.value) {
+  if (enabled.value && !token.value.trim() && !tokenStored.value) {
     notify.error("Token is required when the agent is enabled");
     return;
   }

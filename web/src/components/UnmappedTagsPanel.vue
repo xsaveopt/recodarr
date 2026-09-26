@@ -22,7 +22,7 @@ async function load() {
   const res = await notify.tryRun(() => api.arr.unmappedTags(), "Couldn't load unmapped tags");
   unmappedTags.value = res ?? [];
   loading.value = false;
-  loaded.value = true;
+  loaded.value = res !== undefined;
 }
 
 function mapTag(u: UnmappedTag) {
