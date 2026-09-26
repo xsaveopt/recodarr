@@ -533,6 +533,7 @@ func (w *Worker) startEncode(parentCtx context.Context, j store.JobRow) {
 			cancel()
 			w.mu.Lock()
 			delete(w.encoding, j.ID)
+			delete(w.requeueOnCancel, j.ID)
 			w.mu.Unlock()
 
 			w.broadcast(ProgressEvent{JobID: j.ID, Title: j.Title})
