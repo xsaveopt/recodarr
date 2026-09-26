@@ -89,6 +89,10 @@ func newTestEnv(t *testing.T) *testEnv {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
+	prevLimiter := loginLimiter
+	loginLimiter = auth.NewLoginLimiter()
+	t.Cleanup(func() { loginLimiter = prevLimiter })
+
 	env := &testEnv{
 		store:  st,
 		worker: &stubWorker{},
