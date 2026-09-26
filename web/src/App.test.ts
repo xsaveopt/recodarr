@@ -137,4 +137,16 @@ describe("sign out", () => {
     expect(api.logout).toHaveBeenCalled();
     expect(view.router.currentRoute.value.name).toBe("login");
   });
+
+  it("still goes to login when ending the session fails", async () => {
+    api.logout.mockRejectedValue(new Error("offline"));
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    view = await mountAt(App, "/");
+    await click(view.root.querySelector(".user-btn"));
+    await click(view.root.querySelector(".user-menu .menu-item"));
+    await flush();
+    expect(api.logout).toHaveBeenCalled();
+    expect(view.router.currentRoute.value.name).toBe("login");
+    expect(errors).not.toHaveBeenCalled();
+  });
 });

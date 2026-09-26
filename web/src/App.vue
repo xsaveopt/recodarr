@@ -74,9 +74,10 @@ watch(
 async function logout() {
   try {
     await api.auth.logout();
-  } finally {
-    router.replace({ name: "login" });
+  } catch {
+    username.value = "";
   }
+  await router.replace({ name: "login" });
 }
 
 const themeIcon = computed(() =>
